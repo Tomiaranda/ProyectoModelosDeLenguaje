@@ -34,6 +34,23 @@ st.markdown("""<style>
 [data-testid="stChatInput"]:focus-within { border-color: #a1a1aa; box-shadow: 0 0 0 3px rgb(161 161 170 / .25); }
 [data-testid="stChatInputSubmitButton"] { background: #18181b; color: #fff; border-radius: .6rem; }
 [data-testid="stExpander"] details, [data-testid="stStatusWidget"] { border-radius: .75rem; }
+.trace { border: 1px solid #e4e4e7; border-radius: .75rem; padding: .75rem 1rem; margin: .25rem 0 .75rem; }
+.trace-head { display: flex; justify-content: space-between; font-size: .8rem; color: #71717a; margin-bottom: .5rem; }
+.trace-head b { color: #09090b; font-weight: 600; }
+.trace-bar { height: 3px; background: #f4f4f5; border-radius: 9999px; margin-bottom: .6rem; overflow: hidden; }
+.trace-bar span { display: block; height: 100%; background: #18181b; transition: width .3s; }
+.trace ol { list-style: none; margin: 0; padding: 0; }
+.trace li { position: relative; padding: 0 0 .55rem 1.6rem; font-size: .9rem; margin: 0; }
+.trace li:not(:last-child)::after { content: ""; position: absolute; left: .45rem; top: 1.1rem; bottom: .1rem; width: 1px; background: #e4e4e7; }
+.trace li::before { content: ""; position: absolute; left: 0; top: .2rem; width: .9rem; height: .9rem;
+  border-radius: 9999px; border: 1.5px solid #a1a1aa; box-sizing: border-box; }
+.trace li.hecho { color: #a1a1aa; text-decoration: line-through; }
+.trace li.hecho::before { background: #18181b; border-color: #18181b;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E"); }
+.trace li.en_curso { font-weight: 500; }
+.trace li.en_curso::before { border-color: #18181b; border-top-color: transparent; animation: girar .8s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .trace li.en_curso::before { animation: none; border-top-color: #18181b; } }
 </style>""", unsafe_allow_html=True)
 
 CLAVES = {
@@ -148,20 +165,44 @@ def render_banco(texto: str, clave: str) -> bool:
     return True
 
 
+def html_plan(pasos: list[dict], terminado: bool = False) -> str:
+    """Lista TO DO estilo trace: ✓ hecho, girando en curso, ○ pendiente."""
+    from html import escape
+
+    estados = ["hecho" if terminado else p.get("estado", "pendiente") for p in pasos]
+    hechos = estados.count("hecho")
+    items = "".join(f'<li class="{e}">{escape(p.get("paso", ""))}</li>' for p, e in zip(pasos, estados))
+    return (f'<div class="trace"><div class="trace-head"><b>Plan</b><span>{hechos}/{len(pasos)}</span></div>'
+            f'<div class="trace-bar"><span style="width:{100 * hechos // max(len(pasos), 1)}%"></span></div>'
+            f"<ol>{items}</ol></div>")
+
+
 def render_eventos(eventos) -> list[dict]:
     """Dibuja los eventos a medida que llegan (en vivo o desde el historial)."""
     emitidos = []
     llamadas = {}   # id del tool call -> (evento de la llamada, contenedor st.status)
+    plan, pasos, ids_plan = None, [], set()   # el plan se dibuja una vez y se actualiza en el lugar
     for e in eventos:
         emitidos.append(e)
         tipo = e["tipo"]
+        if tipo == "llamada" and e["nombre"] == "plan":
+            ids_plan.add(e["id"])
+            pasos = e["args"].get("pasos") or pasos
+            plan = plan or st.empty()
+            plan.markdown(html_plan(pasos), unsafe_allow_html=True)
+            continue
+        if tipo == "resultado" and e["id"] in ids_plan:
+            continue
         if tipo == "razonamiento":
             with st.expander("💭 Razonamiento del modelo", expanded=False):
                 st.markdown("  \n".join(l.strip() for l in e["texto"].splitlines()))
         elif tipo == "recordatorio":
             st.info("🔁 El modelo terminó sin generar el banco: el middleware le recordó el paso 4.")
         elif tipo == "texto":
-            if not render_banco(e["texto"], f"{id(e)}-{len(emitidos)}"):
+            if render_banco(e["texto"], f"{id(e)}-{len(emitidos)}"):
+                if plan:   # el banco cierra el turno: el plan queda completo
+                    plan.markdown(html_plan(pasos, terminado=True), unsafe_allow_html=True)
+            else:
                 st.markdown(e["texto"])
         elif tipo == "llamada":
             status = st.status(titulo_llamada(e), expanded=PASOS_EXPANDIDOS)   # "running" hasta el resultado

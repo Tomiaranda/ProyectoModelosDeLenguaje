@@ -25,6 +25,7 @@ from langchain.agents import AgentState
 from langchain.messages import ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langgraph.types import Command
+from pydantic import BaseModel, Field
 
 from campus.archivos import extraer_texto
 from campus.cliente_mcp import CampusNoConfigurado, campus
@@ -81,6 +82,28 @@ def _responder(runtime: ToolRuntime, texto: str, artifact: Any = None, **update)
 
 def _material(runtime: ToolRuntime, origen: str, fuente: str, texto: str) -> dict:
     return {"turno": runtime.context.turno, "origen": origen, "fuente": fuente, "texto": texto}
+
+
+# --- 0. Plan (TO DO) ------------------------------------------------------------------
+
+class Paso(BaseModel):
+    paso: str = Field(description="Acción concreta, p. ej. «Buscar embeddings en la bibliografía».")
+    estado: Literal["pendiente", "en_curso", "hecho"] = "pendiente"
+
+
+@tool
+def plan(pasos: list[Paso]) -> str:
+    """Planificá como una lista TO DO los pedidos LARGOS: los que requieren varias fuentes
+    (bibliografía + campus + leer archivos + internet) o varios temas. NO la uses para
+    pedidos simples (cambios sobre un banco ya generado, pedir datos que faltan).
+
+    Llamala al empezar con todos los pasos y el primero "en_curso". Después, cada vez que
+    termines un paso, volvé a llamarla con la lista completa actualizada EN LA MISMA
+    respuesta que la tool del paso siguiente (no gastes una llamada al modelo solo en esto).
+    Podés agregar o sacar pasos si lo que encontrás cambia el plan.
+    """
+    hechos = sum(p.estado == "hecho" for p in pasos)
+    return f"Plan actualizado: {hechos}/{len(pasos)} pasos hechos."
 
 
 # --- 1. RAG de bibliografía oficial ------------------------------------------------
@@ -370,7 +393,7 @@ def generar_banco_estudia(titulo: str, temas: str, runtime: ToolRuntime[Contexto
     )
 
 
-TOOLS: list = [buscar_bibliografia, explorar_campus, buscar_en_internet, generar_banco_estudia]
+TOOLS: list = [plan, buscar_bibliografia, explorar_campus, buscar_en_internet, generar_banco_estudia]
 
 
 def banco_generado(mensaje) -> str | None:
