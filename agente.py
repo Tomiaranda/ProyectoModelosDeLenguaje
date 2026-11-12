@@ -15,8 +15,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import before_model
-from langchain.messages import AIMessage
+from langchain.agents.middleware import after_model, before_model
+from langchain.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 
@@ -60,13 +60,52 @@ def cerrar_con_json(state: EstadoEstudio, runtime) -> dict | None:
     return None
 
 
+RECORDATORIO = (
+    "[recordatorio del sistema] Ya consultaste las fuentes de este pedido. Ahora llamá a "
+    "generar_banco_estudia con el título, los temas, la cantidad y los tipos pedidos."
+)
+
+
+def _es_recordatorio(m) -> bool:
+    return m.type == "human" and m.additional_kwargs.get("recordatorio", False)
+
+
+@after_model(can_jump_to=["model"])
+def exigir_cierre(state: EstadoEstudio, runtime) -> dict | None:
+    """Middleware propio: red de seguridad para el paso 4 (cierre obligatorio).
+
+    Si el modelo termina el turno sin llamar a la generadora pero ya consultó
+    la bibliografía (p. ej. un modelo gratuito que se "pierde" en su
+    razonamiento), se le recuerda UNA vez que genere el banco y vuelve al modelo.
+    """
+    mensajes = state["messages"]
+    ultimo = mensajes[-1]
+    if ultimo.type != "ai" or ultimo.tool_calls:
+        return None
+    turno = []
+    for m in reversed(mensajes):
+        if m.type == "human" and not _es_recordatorio(m):
+            break
+        turno.append(m)
+    if any(_es_recordatorio(m) for m in turno):
+        return None   # ya se le recordó en este turno: no insistir (evita bucles)
+    consulto = any(c["name"] == "buscar_bibliografia" for m in turno if m.type == "ai"
+                   for c in m.tool_calls)
+    if not consulto:
+        return None   # p. ej. le pidió al alumno la materia o los temas
+    return {
+        "messages": [HumanMessage(RECORDATORIO, additional_kwargs={"recordatorio": True})],
+        "jump_to": "model",
+    }
+
+
 adaptador = obtener_adaptador()   # patrón Adapter: el agente no sabe qué proveedor hay detrás
 
 agent = create_agent(
     model=adaptador.modelo_chat(),
     tools=TOOLS,
     system_prompt=SYSTEM_PROMPT,
-    middleware=[cerrar_con_json],
+    middleware=[cerrar_con_json, exigir_cierre],
     state_schema=EstadoEstudio,     # messages + material recopilado
     context_schema=Contexto,        # número de turno, de solo lectura
     checkpointer=SqliteSaver(sqlite3.connect(DIR / "memoria.db", check_same_thread=False)),
@@ -118,21 +157,29 @@ def list_threads(limit: int = 6) -> list[tuple[str, str]]:
 
 # --- Eventos: lo único que las interfaces necesitan conocer ----------------------------
 
+MAX_CHARS_RAZONAMIENTO = 3000
+
+
 def _razonamiento(m) -> str:
     """Razonamiento del modelo, si el proveedor lo expone (Gemini sí; Llama 3.3 no)."""
     bloques = [
         b.get("reasoning", "") for b in m.content_blocks
         if b.get("type") == "reasoning" and b.get("reasoning")
     ]
-    return ("\n\n".join(bloques)
-            or m.additional_kwargs.get("reasoning_content", "")
-            or m.additional_kwargs.get("reasoning", ""))
+    texto = ("\n\n".join(bloques)
+             or m.additional_kwargs.get("reasoning_content", "")
+             or m.additional_kwargs.get("reasoning", ""))
+    if len(texto) > MAX_CHARS_RAZONAMIENTO:   # un bucle del modelo no debe saturar la UI
+        texto = texto[:MAX_CHARS_RAZONAMIENTO] + " […recortado]"
+    return texto
 
 
 def eventos(mensajes: list) -> Iterator[dict]:
     """Traduce mensajes del grafo a eventos para mostrar."""
     for m in mensajes:
-        if m.type == "ai":
+        if _es_recordatorio(m):
+            yield {"tipo": "recordatorio", "texto": m.text}
+        elif m.type == "ai":
             if razonamiento := _razonamiento(m):
                 yield {"tipo": "razonamiento", "texto": razonamiento}
             if m.text:
@@ -161,7 +208,7 @@ def saved_turns(config: RunnableConfig) -> list[tuple[str, list[dict]]]:
     """La conversación guardada como turnos: (pedido, eventos del agente)."""
     turnos: list[tuple[str, list[dict]]] = []
     for m in saved_state(config).get("messages", []):
-        if m.type == "human":
+        if m.type == "human" and not _es_recordatorio(m):
             turnos.append((m.text, []))
         elif turnos:
             turnos[-1][1].extend(eventos([m]))
@@ -178,6 +225,8 @@ def print_evento(e: dict) -> None:
         print(f"[tool] {e['nombre']}({e['args']})")
     elif tipo == "resultado":
         print(f"[resultado] {e['texto'][:300]}\n")
+    elif tipo == "recordatorio":
+        print("[middleware] se le recordó al modelo que genere el banco\n")
     elif tipo == "texto":
         print(f"Agente:\n{e['texto']}\n")
 

@@ -101,6 +101,8 @@ def render_eventos(eventos) -> list[dict]:
         if tipo == "razonamiento":
             with st.expander("💭 Razonamiento del modelo", expanded=False):
                 st.markdown("  \n".join(l.strip() for l in e["texto"].splitlines()))
+        elif tipo == "recordatorio":
+            st.info("🔁 El modelo terminó sin generar el banco: el middleware le recordó el paso 4.")
         elif tipo == "texto":
             if not render_banco(e["texto"], f"{id(e)}-{len(emitidos)}"):
                 st.markdown(e["texto"])

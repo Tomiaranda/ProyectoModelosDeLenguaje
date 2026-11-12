@@ -161,6 +161,8 @@ def explorar_campus(accion: Literal["materias", "contenido", "leer"],
     Sirve para cruzar la teoría del libro con el enfoque, los ejercicios y el
     recorte de temas de los docentes. Flujo: "materias" -> course_id ->
     "contenido" -> url de un apunte, filmina o guía -> "leer".
+    Leé solo ítems [resource] (PDF, filminas, guías) o [page]: los [url] son
+    links externos (Colab, YouTube) y no se pueden leer. Con 1 o 2 lecturas alcanza.
 
     Args:
         accion: "materias" lista las materias del alumno con su course_id;

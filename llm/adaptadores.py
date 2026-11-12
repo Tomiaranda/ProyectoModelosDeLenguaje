@@ -22,6 +22,10 @@ load_dotenv()
 # reintentan con espera exponencial (max_retries): no hace falta middleware.
 REINTENTOS = int(os.getenv("LLM_MAX_RETRIES", "6"))
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "180"))
+# Los modelos de razonamiento entran en bucles repetitivos con temperatura 0;
+# los proveedores recomiendan ~0.6. El tope de salida corta un bucle a tiempo.
+TEMPERATURA_AGENTE = float(os.getenv("LLM_TEMPERATURE", "0.6"))
+MAX_TOKENS_SALIDA = int(os.getenv("LLM_MAX_TOKENS", "8000"))
 
 
 def _requerir(variable: str) -> str:
@@ -42,10 +46,10 @@ class AdaptadorLLM(ABC):
         self.modelo = modelo
 
     @abstractmethod
-    def modelo_chat(self, temperatura: float = 0) -> BaseChatModel:
+    def modelo_chat(self, temperatura: float = TEMPERATURA_AGENTE) -> BaseChatModel:
         """Modelo de chat con soporte de tool calling, para `create_agent`."""
 
-    def completar(self, sistema: str, usuario: str, temperatura: float = 0.4) -> str:
+    def completar(self, sistema: str, usuario: str, temperatura: float = 0.6) -> str:
         """Una única llamada sistema + usuario -> texto. La usa la tool generadora."""
         respuesta = self.modelo_chat(temperatura).invoke(
             [SystemMessage(sistema), HumanMessage(usuario)]
@@ -94,7 +98,7 @@ class AdaptadorOpenRouter(AdaptadorLLM):
         respaldo = os.getenv("MODEL_FALLBACKS", "nvidia/nemotron-3-ultra-550b-a55b:free")
         self._respaldo = [m.strip() for m in respaldo.split(",") if m.strip() and m.strip() != modelo]
 
-    def modelo_chat(self, temperatura: float = 0) -> BaseChatModel:
+    def modelo_chat(self, temperatura: float = TEMPERATURA_AGENTE) -> BaseChatModel:
         return _chat_openai_con_razonamiento()(
             model=self.modelo,
             base_url=self.URL,
@@ -102,9 +106,11 @@ class AdaptadorOpenRouter(AdaptadorLLM):
             temperature=temperatura,
             max_retries=REINTENTOS,
             timeout=TIMEOUT,
+            max_tokens=MAX_TOKENS_SALIDA,
             extra_body={
-                # Pide a OpenRouter que devuelva el razonamiento (modelos que lo soportan).
-                "reasoning": {"enabled": True},
+                # Pide el razonamiento (modelos que lo soportan) con esfuerzo bajo:
+                # alcanza para decidir qué tool llamar y gasta menos tiempo y tokens.
+                "reasoning": {"enabled": True, "effort": "low"},
                 # Fallback del lado de OpenRouter: si el modelo principal da 429 o no
                 # está disponible, prueba los siguientes en el mismo request.
                 "models": [self.modelo, *self._respaldo],
@@ -123,7 +129,7 @@ class AdaptadorGemini(AdaptadorLLM):
         super().__init__(modelo)
         _requerir("GOOGLE_API_KEY")
 
-    def modelo_chat(self, temperatura: float = 0) -> BaseChatModel:
+    def modelo_chat(self, temperatura: float = TEMPERATURA_AGENTE) -> BaseChatModel:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         return ChatGoogleGenerativeAI(
@@ -139,7 +145,7 @@ class AdaptadorLMStudio(AdaptadorLLM):
 
     proveedor = "lmstudio"
 
-    def modelo_chat(self, temperatura: float = 0) -> BaseChatModel:
+    def modelo_chat(self, temperatura: float = TEMPERATURA_AGENTE) -> BaseChatModel:
         return _chat_openai_con_razonamiento()(
             model=self.modelo,
             base_url=os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
