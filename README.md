@@ -46,9 +46,11 @@ Las tres tools de búsqueda guardan lo que encuentran en el estado del agente (`
 
 **1. Clonar y entrar**
 
+`--recursive` también descarga el servidor MCP del campus, que es un submódulo:
+
 ```bash
-git clone https://github.com/<usuario>/ProyectoFinalModelosDeLenguaje.git
-cd ProyectoFinalModelosDeLenguaje
+git clone --recursive https://github.com/Tomiaranda/ProyectoModelosDeLenguaje.git
+cd ProyectoModelosDeLenguaje
 ```
 
 **2. Entorno virtual y dependencias**
@@ -59,10 +61,10 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-**3. Servidor MCP del campus**: se clona dentro de la carpeta del proyecto. Usa el mismo entorno virtual, porque sus dependencias (`mcp`, `httpx`) ya están en `requirements.txt`.
+**3. Servidor MCP del campus**: es el submódulo `campus-utn-frm-mcp/` ([ignaw05/campus-utn-frm-mcp](https://github.com/ignaw05/campus-utn-frm-mcp)). Usa el mismo entorno virtual, porque sus dependencias (`mcp`, `httpx`) ya están en `requirements.txt`. Si clonaste sin `--recursive`:
 
 ```bash
-git clone https://github.com/ignaw05/campus-utn-frm-mcp.git
+git submodule update --init
 ```
 
 **4. Configurar el `.env`**
@@ -79,7 +81,7 @@ Completá `OPENROUTER_API_KEY`, `GOOGLE_API_KEY`, `CAMPUS_USER` y `CAMPUS_PASS`.
 | Gemini | `MODEL_PROVIDER=google_genai`, `MODEL_NAME=gemini-2.5-flash` |
 | LM Studio | `MODEL_PROVIDER=lmstudio`, `MODEL_NAME=<id del modelo cargado>` |
 
-**5. Indexar la bibliografía** (una vez, y cada vez que agregues libros)
+**5. Indexar la bibliografía** (el repo ya trae el índice `rag/bibliografia.db`; solo hace falta regenerarlo cuando agregás o cambiás libros)
 
 Cada subcarpeta de `rag/libros/` es una materia y cada PDF de esa carpeta es un libro:
 
@@ -109,6 +111,28 @@ python agente.py                  # o por consola
 python -m pytest tests
 ```
 
+## Deploy en Streamlit Community Cloud
+
+1. En [share.streamlit.io](https://share.streamlit.io), elegí **Create app** → repositorio `Tomiaranda/ProyectoModelosDeLenguaje`, rama `main`, archivo `app.py`.
+2. En **Advanced settings**, elegí Python **3.12** y pegá los secretos en formato TOML. Streamlit los expone como variables de entorno, así que el código los lee igual que desde el `.env`:
+
+   ```toml
+   MODEL_PROVIDER = "openrouter"
+   MODEL_NAME = "google/gemma-4-31b-it:free"
+   MODEL_FALLBACKS = "nvidia/nemotron-3-ultra-550b-a55b:free"
+   OPENROUTER_API_KEY = "..."
+   GOOGLE_API_KEY = "..."
+   # Opcional, ver la advertencia de abajo:
+   # CAMPUS_USER = "..."
+   # CAMPUS_PASS = "..."
+   ```
+
+3. Deploy. El índice del RAG y el MCP del campus (submódulo) vienen en el repo, así que no hace falta ningún paso extra.
+
+> ⚠️ Una app de Community Cloud es **pública** por defecto: cualquiera que la use gasta tus claves y, si cargaste `CAMPUS_USER`/`CAMPUS_PASS`, entra al campus **con tu cuenta**. Restringí quién puede verla (**Settings → Sharing**: solo los emails que invites) o no cargues las credenciales del campus. Sin ellas, el agente sigue con libros y web.
+
+La memoria (`memoria.db`) y los JSON de `output/` se guardan en el disco del contenedor, que se borra cuando la app se reinicia o se duerme.
+
 ## Demo sugerida
 
 1. *"Haceme 8 preguntas de Modelos de Lenguaje sobre tokenización y embeddings."* Se ven en orden las 4 tools y al final el JSON, con un botón para descargarlo.
@@ -135,7 +159,7 @@ python -m pytest tests
 └── tests/               # Pruebas del validador
 ```
 
-Se generan al usar la app y no se versionan: `memoria.db`, `conversaciones.txt`, `rag/bibliografia.db`, `output/` y `descargas_campus/`.
+Se generan al usar la app y no se versionan: `memoria.db`, `conversaciones.txt`, `output/` y `descargas_campus/`. El índice `rag/bibliografia.db` sí se versiona (pesa unos 400 KB), para que el deploy funcione sin correr la ingesta.
 
 ## Justificación de componentes
 
