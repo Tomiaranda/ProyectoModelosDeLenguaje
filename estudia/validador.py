@@ -8,6 +8,8 @@ validar normaliza descuidos inofensivos (un índice suelto en vez de lista, un
 import json
 import re
 
+from json_repair import repair_json
+
 from estudia.formato import TIPOS
 
 HUECO = "___"
@@ -19,7 +21,16 @@ def extraer_json(texto: str) -> dict:
     inicio, fin = texto.find("{"), texto.rfind("}")
     if inicio == -1 or fin == -1:
         raise ValueError("la respuesta no contiene un objeto JSON")
-    return json.loads(texto[inicio:fin + 1])
+    crudo = texto[inicio:fin + 1]
+    try:
+        return json.loads(crudo)
+    except json.JSONDecodeError as e:
+        # Los modelos chicos olvidan una coma o no escapan comillas: se repara en vez de
+        # gastar un reintento. Si no queda un objeto, se informa el error original.
+        reparado = repair_json(crudo, return_objects=True)
+        if isinstance(reparado, dict) and reparado:
+            return reparado
+        raise e
 
 
 def _normalizar(p: dict) -> None:

@@ -118,7 +118,7 @@ agent = create_agent(
 # --- Conversaciones -------------------------------------------------------------
 
 def _config(thread_id: str) -> RunnableConfig:
-    return {"configurable": {"thread_id": thread_id}, "recursion_limit": 40}
+    return {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}   # ~4 pasos del grafo por vuelta de tools
 
 
 def _thread_ids() -> list[str]:

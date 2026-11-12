@@ -14,6 +14,9 @@ langgraph-checkpoint-sqlite>=3.0
 numpy>=1.26
 pypdf>=5.0
 
+# Arregla el JSON mal formado del generador (comas o comillas de más/de menos)
+json-repair>=0.30
+
 # Campus UTN FRM (cliente MCP + dependencias del servidor campus_mcp.py)
 mcp>=2.3,<3
 httpx>=0.28

@@ -82,3 +82,12 @@ def test_preguntas_repetidas():
 
 def test_extraer_json_con_bloque_de_codigo():
     assert extraer_json('```json\n{"titulo": "x", "preguntas": []}\n```')["titulo"] == "x"
+
+
+def test_repara_json_mal_formado():
+    roto = ('```json\n{"titulo": "T", "preguntas": [\n'
+            '  {"tipo": "verdadero_falso", "consigna": "El "transformer" usa atención", "respuesta": true}\n'
+            '  {"tipo": "verdadero_falso", "consigna": "Otra", "respuesta": false}\n]}\n```')
+    banco = extraer_json(roto)
+    assert len(banco["preguntas"]) == 2
+    assert "transformer" in banco["preguntas"][0]["consigna"]
