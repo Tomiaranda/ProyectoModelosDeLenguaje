@@ -1,0 +1,30 @@
+# Núcleo del agente
+langchain>=1.0
+langgraph>=1.0
+python-dotenv>=1.0
+
+# Proveedores de modelos (detrás de los adaptadores de llm/adaptadores.py)
+langchain-openai>=1.0          # OpenRouter (API compatible con OpenAI) y LM Studio
+langchain-google-genai>=3.0    # Gemini y embeddings gemini-embedding-001
+
+# Memoria de corto plazo (checkpointer)
+langgraph-checkpoint-sqlite>=3.0
+
+# RAG sobre SQLite
+numpy>=1.26
+pypdf>=5.0
+
+# Campus UTN FRM (cliente MCP + dependencias del servidor campus_mcp.py)
+mcp>=2.3,<3
+httpx>=0.28
+python-pptx>=1.0               # texto de filminas descargadas
+python-docx>=1.1               # texto de guías .docx
+
+# Búsqueda web gratuita, sin API key
+ddgs>=9.0
+
+# UI
+streamlit>=1.40
+
+# Pruebas
+pytest>=8.0

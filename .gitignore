@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Claves
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Datos generados al usar la app
+memoria.db
+memoria.db-*
+conversaciones.txt
+output/
+descargas_campus/
+
+# Base vectorial (se regenera con: python -m rag.ingest)
+rag/bibliografia.db
+
+# Servidor MCP del campus (repositorio aparte, se clona según el README)
+campus-utn-frm-mcp/
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
