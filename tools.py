@@ -155,14 +155,16 @@ def buscar_bibliografia(materia: str, consulta: str, runtime: ToolRuntime[Contex
 @tool
 def explorar_campus(accion: Literal["materias", "contenido", "leer"],
                     runtime: ToolRuntime[Contexto],
-                    course_id: int | None = None, url: str | None = None) -> Command:
+                    course_id: int | None = None, url: str | None = None,
+                    desde: int = 0) -> Command:
     """SEGUNDO PASO. Explora el Campus Virtual UTN FRM (Moodle) mediante su servidor MCP.
 
     Sirve para cruzar la teoría del libro con el enfoque, los ejercicios y el
     recorte de temas de los docentes. Flujo: "materias" -> course_id ->
     "contenido" -> url de un apunte, filmina o guía -> "leer".
     Leé solo ítems [resource] (PDF, filminas, guías) o [page]: los [url] son
-    links externos (Colab, YouTube) y no se pueden leer. Con 1 o 2 lecturas alcanza.
+    links externos (Colab, YouTube) y no se pueden leer. Si el tema pedido está más
+    adelante en el archivo, seguí leyendo con `desde` en vez de quedarte con el inicio.
 
     Args:
         accion: "materias" lista las materias del alumno con su course_id;
@@ -171,6 +173,9 @@ def explorar_campus(accion: Literal["materias", "contenido", "leer"],
             archivo (PDF, PPTX, DOCX) (requiere url).
         course_id: id de la materia, sale de accion="materias".
         url: URL del campus, sale de accion="contenido".
+        desde: con accion="leer", carácter desde el que seguir leyendo. Cada lectura
+            devuelve un tramo; si el archivo sigue, el texto termina indicando el
+            `desde` de la próxima llamada.
     """
     try:
         if accion == "materias":
@@ -190,13 +195,19 @@ def explorar_campus(accion: Literal["materias", "contenido", "leer"],
         if respuesta.startswith("Descargado:"):
             ruta = Path(respuesta.removeprefix("Descargado:").strip())
             nombre = ruta.name
-            texto = extraer_texto(ruta, MAX_CHARS_CAMPUS)
+            completo = extraer_texto(ruta, desde + MAX_CHARS_CAMPUS + 1)
         else:
-            texto = respuesta[:MAX_CHARS_CAMPUS]
+            completo = respuesta
+        hasta = desde + MAX_CHARS_CAMPUS
+        texto = completo[desde:hasta]
+        if desde and not texto.strip():
+            return _responder(runtime, f"«{nombre}» no tiene más texto después de desde={desde}.")
         if not texto.strip():
             return _responder(runtime, f"«{nombre}» no tiene texto extraíble (¿escaneado?).")
         material = [_material(runtime, "campus", f"Campus: {nombre}", texto)]
-        return _responder(runtime, f"Campus: {nombre}\n{texto}",
+        sigue = (f"\n[…el archivo continúa: llamá de nuevo con accion='leer', la misma url "
+                 f"y desde={hasta} para leer el resto]") if len(completo) > hasta else ""
+        return _responder(runtime, f"Campus: {nombre}\n{texto}{sigue}",
                           artifact={"accion": accion, "archivo": nombre}, material=material)
     except CampusNoConfigurado as e:
         return _responder(runtime, f"{e} Seguí sin el campus.")
