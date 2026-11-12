@@ -32,7 +32,25 @@ st.markdown("""<style>
   box-shadow: 0 1px 2px rgb(0 0 0 / .05), 0 4px 12px rgb(0 0 0 / .04);
 }
 [data-testid="stChatInput"]:focus-within { border-color: #a1a1aa; box-shadow: 0 0 0 3px rgb(161 161 170 / .25); }
-[data-testid="stChatInputSubmitButton"] { background: #18181b; color: #fff; border-radius: .6rem; }
+[data-testid="stChatInputSubmitButton"] { background: #18181b; color: #fff; border-radius: 9999px; }
+[data-testid="stChatInputSubmitButton"]:disabled { background: #e4e4e7; color: #a1a1aa; }
+[data-testid="stChatInputFileUploadButton"] { border: 1px solid #e4e4e7; border-radius: 9999px; }
+.tr { margin: .15rem 0 .5rem; font-size: .875rem; color: #71717a; }
+.tr summary { display: inline-flex; align-items: center; gap: .45rem; cursor: pointer; list-style: none;
+  padding: .15rem .35rem; margin-left: -.35rem; border-radius: .5rem; }
+.tr summary::-webkit-details-marker { display: none; }
+.tr summary:hover { color: #09090b; background: #f4f4f5; }
+.tr summary:focus-visible { outline: 2px solid #a1a1aa; outline-offset: 2px; }
+.tr-ico { width: 1rem; height: 1rem; flex: none; }
+.tr-chev { transition: transform .15s; }
+.tr[open] .tr-chev { transform: rotate(90deg); }
+.tr-body { margin: .35rem 0 0 .45rem; padding-left: .95rem; border-left: 1px solid #e4e4e7; }
+.tr-pre { white-space: pre-wrap; max-height: 20rem; overflow: auto; }
+.tr-line { display: flex; align-items: center; gap: .45rem; padding: .2rem 0; color: #71717a; text-decoration: none; }
+a.tr-line:hover { color: #09090b; }
+.tr-line > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-out { opacity: .6; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 [data-testid="stExpander"] details, [data-testid="stStatusWidget"] { border-radius: .75rem; }
 .trace { border: 1px solid #e4e4e7; border-radius: .75rem; padding: .75rem 1rem; margin: .25rem 0 .75rem; }
 .trace-head { display: flex; justify-content: space-between; font-size: .8rem; color: #71717a; margin-bottom: .5rem; }
@@ -177,6 +195,70 @@ def html_plan(pasos: list[dict], terminado: bool = False) -> str:
             f"<ol>{items}</ol></div>")
 
 
+ICONOS = {   # trazos de lucide, en línea para no sumar dependencias
+    "globo": '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/>',
+    "libro": '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
+    "archivo": '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+    "check": '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+    "flecha": '<path d="M7 7h10v10M7 17 17 7"/>',
+    "chevron": '<path d="m9 18 6-6-6-6"/>',
+}
+
+
+def icono(nombre: str, clase: str = "") -> str:
+    return (f'<svg class="tr-ico {clase}" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            f"{ICONOS[nombre]}</svg>")
+
+
+def html_razonamiento(texto: str) -> str:
+    """Línea "Pensó" que se despliega con el razonamiento (Reasoning de shadcn)."""
+    from html import escape
+
+    return (f'<details class="tr"><summary>{icono("check")}<span>Pensó</span>'
+            f'{icono("chevron", "tr-chev")}</summary><div class="tr-body tr-pre">{escape(texto.strip())}</div></details>')
+
+
+def fuentes_del_turno(eventos: list[dict]) -> list[dict]:
+    """Fuentes que usó el agente, sin repetir: web (con link), campus y libros."""
+    llamadas = {e["id"]: e for e in eventos if e["tipo"] == "llamada"}
+    fuentes = {}
+    for e in eventos:
+        if e["tipo"] != "resultado" or e["id"] not in llamadas:
+            continue
+        nombre, args, datos = llamadas[e["id"]]["nombre"], llamadas[e["id"]]["args"], e["datos"]
+        if nombre == "buscar_en_internet" and isinstance(datos, list):
+            for f in datos:
+                if f.get("url"):
+                    fuentes[f["url"]] = {"titulo": f.get("titulo"), "url": f["url"], "icono": "globo"}
+        elif nombre == "explorar_campus" and isinstance(datos, dict) and datos.get("archivo"):
+            fuentes[args.get("url") or datos["archivo"]] = {
+                "titulo": datos["archivo"], "url": args.get("url"), "icono": "archivo"}
+        elif nombre == "buscar_bibliografia" and isinstance(datos, dict):
+            for f in datos.get("fragmentos", []):
+                fuentes.setdefault(f["libro"], {"titulo": f["libro"], "url": None, "icono": "libro"})
+    return list(fuentes.values())
+
+
+def html_fuentes(fuentes: list[dict]) -> str:
+    """Línea "Usó N fuentes" que se despliega con un link por fuente (Sources de shadcn)."""
+    from html import escape
+    from urllib.parse import urlparse
+
+    filas = []
+    for f in fuentes:
+        titulo = escape(f["titulo"] or urlparse(f["url"]).hostname or f["url"])
+        if f["url"]:
+            filas.append(f'<a class="tr-line" href="{escape(f["url"])}" target="_blank" rel="noreferrer">'
+                         f'{icono(f["icono"])}<span>{titulo}<span class="sr-only"> (se abre en otra pestaña)'
+                         f'</span></span>{icono("flecha", "tr-out")}</a>')
+        else:
+            filas.append(f'<div class="tr-line">{icono(f["icono"])}<span>{titulo}</span></div>')
+    n = len(fuentes)
+    return (f'<details class="tr"><summary>{icono("globo")}<span>Usó {n} fuente{"s" if n != 1 else ""}</span>'
+            f'{icono("chevron", "tr-chev")}</summary><div class="tr-body">{"".join(filas)}</div></details>')
+
+
 def render_eventos(eventos) -> list[dict]:
     """Dibuja los eventos a medida que llegan (en vivo o desde el historial)."""
     emitidos = []
@@ -194,8 +276,7 @@ def render_eventos(eventos) -> list[dict]:
         if tipo == "resultado" and e["id"] in ids_plan:
             continue
         if tipo == "razonamiento":
-            with st.expander("💭 Razonamiento del modelo", expanded=False):
-                st.markdown("  \n".join(l.strip() for l in e["texto"].splitlines()))
+            st.markdown(html_razonamiento(e["texto"]), unsafe_allow_html=True)
         elif tipo == "recordatorio":
             st.info("🔁 El modelo terminó sin generar el banco: el middleware le recordó el paso 4.")
         elif tipo == "texto":
@@ -212,6 +293,8 @@ def render_eventos(eventos) -> list[dict]:
             with status:
                 estado = detalle_resultado(llamada, e)
             status.update(state=estado or "complete")
+    if fuentes := fuentes_del_turno(emitidos):
+        st.markdown(html_fuentes(fuentes), unsafe_allow_html=True)
     return emitidos
 
 
@@ -255,13 +338,43 @@ for pregunta, eventos in st.session_state.historial:
     with st.chat_message("assistant"):
         render_eventos(eventos)
 
-if prompt := st.chat_input("Ej.: 10 preguntas de Modelos de Lenguaje sobre embeddings y transformers"):
+def leer_adjuntos(archivos, turno: int) -> list[dict]:
+    """Texto de los archivos adjuntos, como material del turno (lo lee la generadora)."""
+    import tempfile
+    from pathlib import Path
+
+    from campus.archivos import extraer_texto
+    from tools import MAX_CHARS_CAMPUS
+
+    material = []
+    for f in archivos:
+        with tempfile.NamedTemporaryFile(suffix=Path(f.name).suffix) as tmp:
+            tmp.write(f.getvalue())
+            tmp.flush()
+            try:
+                texto = extraer_texto(Path(tmp.name), MAX_CHARS_CAMPUS)
+            except Exception as e:   # noqa: BLE001
+                st.warning(f"No se pudo leer «{f.name}»: {e}")
+                continue
+        if texto.strip():
+            material.append({"turno": turno, "origen": "adjunto", "fuente": f"Adjunto: {f.name}", "texto": texto})
+        else:
+            st.warning(f"«{f.name}» no tiene texto extraíble (¿escaneado?).")
+    return material
+
+
+if entrada := st.chat_input("Pedí preguntas sobre una materia y sus temas…", accept_file="multiple",
+                            file_type=["pdf", "pptx", "docx", "txt", "md"]):
     turno = len(st.session_state.historial) + 1
+    prompt = entrada.text.strip() or "Armá el banco con el material adjunto."
+    if entrada.files:
+        prompt += "\n\n📎 Adjuntos (ya están en el material): " + ", ".join(f.name for f in entrada.files)
     st.chat_message("user").markdown(prompt)
     with st.chat_message("assistant"):
         try:
+            adjuntos = leer_adjuntos(entrada.files, turno)
             with st.spinner("El agente está trabajando..."):
-                eventos = render_eventos(stream_turn(prompt, st.session_state.config, turno))
+                eventos = render_eventos(stream_turn(prompt, st.session_state.config, turno, adjuntos))
         except Exception as e:   # noqa: BLE001
             st.error(f"El agente falló: {e}")
             st.stop()

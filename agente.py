@@ -38,6 +38,7 @@ El alumno te dice la MATERIA y los TEMAS (y opcionalmente la cantidad y los tipo
 
 Reglas:
 - No respondas preguntas de teoría ni charles: todo pedido termina en un banco de preguntas. Si falta la materia o los temas, pedilos en una sola oración.
+- Si el mensaje trae «📎 Adjuntos», el texto de esos archivos ya está en el material y tiene prioridad: igual buscá en la bibliografía, pero no hace falta buscarlos en el campus.
 - Si una tool devuelve un error, leelo y seguí con el siguiente paso; no repitas la misma llamada más de 2 veces.
 - Si el alumno pide cambios sobre un banco anterior ("agregá 5 de verdadero/falso", "hacelo más difícil"), usá la conversación previa: no hace falta volver a buscar si el material ya está, llamá directamente a `generar_banco_estudia` con los nuevos parámetros, salvo que pida temas nuevos.
 - Materias con bibliografía cargada: {", ".join(materias_con_bibliografia()) or "ninguna todavía"}."""
@@ -192,12 +193,16 @@ def eventos(mensajes: list) -> Iterator[dict]:
             yield {"tipo": "resultado", "id": m.tool_call_id, "texto": m.text, "datos": m.artifact}
 
 
-def stream_turn(user_input: str, config: RunnableConfig, turno: int) -> Iterator[dict]:
-    """Ejecuta un turno del agente y emite sus eventos a medida que ocurren."""
+def stream_turn(user_input: str, config: RunnableConfig, turno: int,
+                adjuntos: list[dict] | None = None) -> Iterator[dict]:
+    """Ejecuta un turno del agente y emite sus eventos a medida que ocurren.
+
+    `adjuntos`: material de los archivos que subió el alumno (lo lee la generadora).
+    """
     vistos = len(saved_state(config).get("messages", []))
     # stream_mode="values": tras cada paso llega el estado completo; se emiten solo los mensajes nuevos.
     for estado in agent.stream(
-        {"messages": [{"role": "user", "content": user_input}]},
+        {"messages": [{"role": "user", "content": user_input}], "material": adjuntos or []},
         config,
         context=Contexto(turno=turno),
         stream_mode="values",

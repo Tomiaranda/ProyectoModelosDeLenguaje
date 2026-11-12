@@ -278,14 +278,14 @@ def buscar_en_internet(consulta: str, runtime: ToolRuntime[Contexto]) -> Command
 def _material_para_generar(material: list[dict], turno: int) -> tuple[str, list[dict]]:
     """Material del turno actual; si no hay (p. ej. "agregá 5 más"), el del último turno con material.
 
-    Se ordena libro -> campus -> web y se recorta al presupuesto total.
+    Se ordena adjuntos -> libro -> campus -> web y se recorta al presupuesto total.
     """
     if not material:
         return "", []
     turnos = [m["turno"] for m in material]
     elegido = turno if turno in turnos else max(turnos)
     seleccion = [m for m in material if m["turno"] == elegido]
-    prioridad = {"libro": 0, "campus": 1, "web": 2}
+    prioridad = {"adjunto": -1, "libro": 0, "campus": 1, "web": 2}   # lo que subió el alumno, primero
     seleccion.sort(key=lambda m: prioridad.get(m["origen"], 3))
     partes, total, usadas = [], 0, []
     for m in seleccion:
