@@ -95,7 +95,7 @@ class AdaptadorOpenRouter(AdaptadorLLM):
     def __init__(self, modelo: str):
         super().__init__(modelo)
         self._api_key = _requerir("OPENROUTER_API_KEY")
-        respaldo = os.getenv("MODEL_FALLBACKS", "nvidia/nemotron-3-ultra-550b-a55b:free")
+        respaldo = os.getenv("MODEL_FALLBACKS", "google/gemma-4-26b-a4b-it:free,baidu/ernie-5.5-flash-preview:free")
         self._respaldo = [m.strip() for m in respaldo.split(",") if m.strip() and m.strip() != modelo]
 
     def modelo_chat(self, temperatura: float = TEMPERATURA_AGENTE) -> BaseChatModel:

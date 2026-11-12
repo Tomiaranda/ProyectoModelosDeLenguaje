@@ -119,7 +119,7 @@ python -m pytest tests
    ```toml
    MODEL_PROVIDER = "openrouter"
    MODEL_NAME = "google/gemma-4-31b-it:free"
-   MODEL_FALLBACKS = "nvidia/nemotron-3-ultra-550b-a55b:free"
+   MODEL_FALLBACKS = "google/gemma-4-26b-a4b-it:free,baidu/ernie-5.5-flash-preview:free"
    OPENROUTER_API_KEY = "..."
    GOOGLE_API_KEY = "..."
    # Opcional, ver la advertencia de abajo:
@@ -166,7 +166,7 @@ Se generan al usar la app y no se versionan: `memoria.db`, `conversaciones.txt`,
 | Componente | Por qué está |
 |---|---|
 | **`create_agent`** | Lo exige la consigna. La tarea tiene varios pasos (libro → campus → web → generar) y el modelo decide qué consultas hacer según los temas pedidos. |
-| **Modelo: Gemma 4 31B (OpenRouter, gratis)** | Tiene *tool calling* nativo, 256k de contexto, buen castellano y **expone su razonamiento**. Es gratis. La idea original era Llama 3.3 70B, pero OpenRouter dio de baja su versión `:free` y hoy no hay ningún Llama gratis con tool calling. Como respaldo, OpenRouter prueba `nvidia/nemotron-3-ultra-550b-a55b:free` en el mismo request si Gemma da 429 (`MODEL_FALLBACKS`). |
+| **Modelo: Gemma 4 31B (OpenRouter, gratis)** | Tiene *tool calling* nativo, 256k de contexto, buen castellano y **expone su razonamiento**. Es gratis. La idea original era Llama 3.3 70B, pero OpenRouter dio de baja su versión `:free` y hoy no hay ningún Llama gratis con tool calling. Si Gemma 4 31B da 429, OpenRouter prueba en el mismo request los respaldos de `MODEL_FALLBACKS`: `google/gemma-4-26b-a4b-it:free` (otro Gemma, más chico) y `baidu/ernie-5.5-flash-preview:free` (otro proveedor, por si el de Gemma está saturado). Los dos son gratis y tienen *tool calling*. |
 | **Patrón Adapter (`llm/adaptadores.py`)** | `agente.py` y `tools.py` solo conocen `AdaptadorLLM` (`modelo_chat()` y `completar()`). Cambiar de proveedor es cambiar el `.env` o registrar un adaptador nuevo, sin tocar el agente ni las tools. Lo mismo vale para los embeddings. |
 | **`buscar_bibliografia` (RAG, tool propia)** | Es la fuente principal: las definiciones salen del libro de la cátedra. SQLite evita depender de un motor vectorial externo. Un embedding cubre 2 páginas para que cada fragmento tenga una definición o demostración completa con su contexto, y se puede citar como "libro, págs. X-Y". Cada fragmento se recorta a 2.200 caracteres y se devuelven 3 por consulta, para cuidar el contexto. |
 | **`explorar_campus` (MCP, externa)** | Cruza la teoría con el recorte de temas y los ejercicios de los docentes. Usa el servidor MCP del campus por stdio y extrae el texto de las filminas y guías que descarga. Las 3 acciones de navegación van en una sola tool para que el modelo tenga menos herramientas entre las que elegir. |
