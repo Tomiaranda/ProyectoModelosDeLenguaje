@@ -1,0 +1,16 @@
+# Paleta "zinc" estilo shadcn/ui
+[theme]
+base = "light"
+primaryColor = "#18181b"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f4f5"
+textColor = "#09090b"
+borderColor = "#e4e4e7"
+showWidgetBorder = true
+baseRadius = "0.75rem"
+buttonRadius = "0.5rem"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap"
+
+[theme.sidebar]
+backgroundColor = "#fafafa"

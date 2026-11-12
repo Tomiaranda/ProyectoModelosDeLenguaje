@@ -12,6 +12,30 @@ import streamlit as st
 
 st.set_page_config(page_title="Generador estud.ia · UTN FRM", page_icon="🎓", layout="wide")
 
+# Chat estilo shadcn: burbuja oscura a la derecha para el usuario, asistente sin
+# burbuja y un input tipo "input-group". Los colores vienen de .streamlit/config.toml.
+st.markdown("""<style>
+.block-container { max-width: 52rem; }
+[data-testid="stChatMessage"] { background: transparent; padding: .25rem 0; gap: .75rem; }
+[data-testid="stChatMessageAvatarUser"] { display: none; }
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { flex-direction: row-reverse; }
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stChatMessageContent"] {
+  flex: 0 1 auto; max-width: 80%; background: #18181b; color: #fafafa;
+  padding: .6rem 1rem; border-radius: 1.25rem 1.25rem .35rem 1.25rem;
+}
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stChatMessageContent"] * { color: inherit; }
+[data-testid="stChatMessageAvatarAssistant"] {
+  background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 9999px;
+}
+[data-testid="stChatInput"] {
+  border: 1px solid #e4e4e7; border-radius: 1rem; background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .05), 0 4px 12px rgb(0 0 0 / .04);
+}
+[data-testid="stChatInput"]:focus-within { border-color: #a1a1aa; box-shadow: 0 0 0 3px rgb(161 161 170 / .25); }
+[data-testid="stChatInputSubmitButton"] { background: #18181b; color: #fff; border-radius: .6rem; }
+[data-testid="stExpander"] details, [data-testid="stStatusWidget"] { border-radius: .75rem; }
+</style>""", unsafe_allow_html=True)
+
 CLAVES = {
     "CAMPUS_USER": "Usuario del campus",
     "CAMPUS_PASS": "Contraseña del campus",
