@@ -5,10 +5,43 @@ La lógica vive en agente.py; acá solo se dibujan los eventos que emite.
 Ejecutar con:  streamlit run app.py
 """
 import json
+import os
+import sys
 
 import streamlit as st
 
 st.set_page_config(page_title="Generador estud.ia · UTN FRM", page_icon="🎓", layout="wide")
+
+CLAVES = {
+    "CAMPUS_USER": "Usuario del campus",
+    "CAMPUS_PASS": "Contraseña del campus",
+    "OPENROUTER_API_KEY": "OpenRouter API key",
+    "GOOGLE_API_KEY": "Google API key",
+}
+
+
+def render_claves() -> None:
+    """Carga las claves en os.environ, así no hace falta ponerlas en el .env."""
+    faltan = [v for v in CLAVES if not os.getenv(v) or os.getenv(v).startswith("tu_")]
+    with st.sidebar.expander("🔑 Claves", expanded=bool(faltan)):
+        with st.form("claves"):
+            valores = {v: st.text_input(etiqueta, type="password",
+                                        placeholder="faltante" if v in faltan else "cargada (vacío = no cambiar)")
+                       for v, etiqueta in CLAVES.items()}
+            if st.form_submit_button("Guardar"):
+                for v, valor in valores.items():
+                    if valor.strip():
+                        os.environ[v] = valor.strip()
+                # ponytail: los módulos leen las claves al importarse; se reimportan para tomarlas.
+                # La conexión MCP previa al campus queda viva hasta reiniciar la app.
+                for m in list(sys.modules):
+                    if m.split(".")[0] in ("agente", "tools", "llm", "campus"):
+                        del sys.modules[m]
+                st.session_state.pop("config", None)
+                st.rerun()
+
+
+render_claves()
 
 try:
     from agente import (

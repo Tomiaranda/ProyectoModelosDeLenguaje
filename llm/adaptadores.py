@@ -31,7 +31,7 @@ MAX_TOKENS_SALIDA = int(os.getenv("LLM_MAX_TOKENS", "8000"))
 def _requerir(variable: str) -> str:
     valor = os.getenv(variable)
     if not valor or valor.startswith("tu_"):
-        raise RuntimeError(f"Falta {variable}. Copiá .env.example a .env y completalo.")
+        raise RuntimeError(f"Falta {variable}. Cargala en la sección 🔑 Claves o en el .env.")
     return valor
 
 
