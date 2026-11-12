@@ -9,6 +9,9 @@ import os
 import sys
 
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()   # antes de render_claves: así las claves recordadas no figuran como faltantes
 
 st.set_page_config(page_title="Generador estud.ia · UTN FRM", page_icon="🎓", layout="wide")
 
@@ -50,8 +53,52 @@ st.markdown("""<style>
 a.tr-line:hover { color: #09090b; }
 .tr-line > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr-out { opacity: .6; }
+.tr-running { color: #09090b; }
+.tr-spin { width: .9rem; height: .9rem; flex: none; border-radius: 9999px; border: 2px solid #d4d4d8;
+  border-top-color: #18181b; animation: girar .8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .tr-spin { animation: none; } }
+/* Colores del ícono: "Pensó" en celeste y cada tool con el suyo */
+.tr-pensar { --c: #0369a1; --c-bg: #f0f9ff; }
+.tr-violeta { --c: #6d28d9; --c-bg: #f5f3ff; }
+.tr-verde { --c: #047857; --c-bg: #ecfdf5; }
+.tr-azul { --c: #1d4ed8; --c-bg: #eff6ff; }
+.tr-grafito { --c: #3f3f46; --c-bg: #f4f4f5; }
+/* Solo el ícono lleva color; el texto queda gris como el resto del trace */
+.tr[class*="tr-"]:not(.tr-error) summary > .tr-ico:not(.tr-chev) { color: var(--c, #71717a); }
+.tr[class*="tr-"]:not(.tr-error) .tr-spin { border-color: var(--c-bg, #d4d4d8); border-top-color: var(--c, #18181b); }
+.tr-error summary, .tr-error .tr-line { color: #dc2626; }
+.tr-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; color: #a1a1aa; margin: .35rem 0 .2rem; }
+.tr-code { background: #fafafa; border: 1px solid #e4e4e7; border-radius: .5rem; padding: .5rem .65rem; margin: 0;
+  font-size: .78rem; white-space: pre-wrap; word-break: break-word; max-height: 16rem; overflow: auto; color: #27272a; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-[data-testid="stExpander"] details, [data-testid="stStatusWidget"] { border-radius: .75rem; }
+[data-testid="stExpander"] details { border-radius: .75rem; }
+/* Sin el muñequito de "Running…" arriba a la derecha: el avance ya se ve en el chat */
+[data-testid="stStatusWidget"] { display: none; }
+/* Sidebar estilo shadcn: header, grupos con label, menú de botones y footer */
+[data-testid="stSidebar"] { border-right: 1px solid #e4e4e7; }
+[data-testid="stSidebarUserContent"] { padding-top: .5rem; }
+.sb-head { display: flex; align-items: center; gap: .6rem; padding: .25rem .25rem .75rem; }
+.sb-logo { width: 2rem; height: 2rem; border-radius: .5rem; background: #18181b; color: #fafafa;
+  display: grid; place-items: center; flex: none; }
+.sb-logo svg { width: 1.1rem; height: 1.1rem; }
+.sb-head b { display: block; font-size: .9rem; font-weight: 600; color: #09090b; line-height: 1.2; }
+.sb-head small { font-size: .75rem; color: #71717a; }
+.sb-label { font-size: .75rem; font-weight: 500; color: #71717a; padding: .75rem .5rem .25rem; }
+.sb-item { display: flex; align-items: center; gap: .5rem; padding: .35rem .5rem; border-radius: .5rem;
+  font-size: .875rem; color: #27272a; text-decoration: none; }
+a.sb-item:hover { background: #f4f4f5; color: #09090b; }
+.sb-item svg { width: 1rem; height: 1rem; flex: none; color: #71717a; }
+.sb-badge { margin-left: auto; font-size: .7rem; font-weight: 500; color: #71717a; background: #f4f4f5;
+  border-radius: 9999px; padding: 0 .45rem; line-height: 1.25rem; }
+.sb-sub { margin: 0 0 .25rem 1rem; padding-left: .6rem; border-left: 1px solid #e4e4e7; }
+.sb-sub div { font-size: .8rem; color: #71717a; padding: .2rem .5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-testid="stSidebar"] button[kind="tertiary"] { width: 100%; justify-content: flex-start; padding: .35rem .5rem;
+  border-radius: .5rem; color: #27272a; min-height: 0; }
+[data-testid="stSidebar"] button[kind="tertiary"] p { font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-testid="stSidebar"] button[kind="tertiary"]:hover { background: #f4f4f5; color: #09090b; }
+[data-testid="stSidebar"] button[kind="tertiary"]:disabled { background: #f4f4f5; color: #09090b; font-weight: 500; opacity: 1; }
+[data-testid="stSidebar"] [data-testid="stElementContainer"] { margin-bottom: -0.6rem; }
+[data-testid="stSidebar"] [data-testid="stExpander"] { margin-top: .75rem; }
 .trace { border: 1px solid #e4e4e7; border-radius: .75rem; padding: .75rem 1rem; margin: .25rem 0 .75rem; }
 .trace-head { display: flex; justify-content: space-between; font-size: .8rem; color: #71717a; margin-bottom: .5rem; }
 .trace-head b { color: #09090b; font-weight: 600; }
@@ -79,32 +126,83 @@ CLAVES = {
 }
 
 
+ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")   # en .gitignore
+
+
 def render_claves() -> None:
     """Carga las claves en os.environ, así no hace falta ponerlas en el .env."""
     faltan = [v for v in CLAVES if not os.getenv(v) or os.getenv(v).startswith("tu_")]
-    with st.sidebar.expander("🔑 Claves", expanded=bool(faltan)):
+    with SB_PIE.expander("🔑 Claves", expanded=bool(faltan)):
         with st.form("claves"):
             valores = {v: st.text_input(etiqueta, type="password",
                                         placeholder="faltante" if v in faltan else "cargada (vacío = no cambiar)")
                        for v, etiqueta in CLAVES.items()}
+            recordar = st.checkbox("Recordar en este equipo", value=True,
+                                   help="Las guarda en el .env local (no se sube a git), "
+                                        "así no hay que cargarlas cada vez que se reinicia la app.")
             if st.form_submit_button("Guardar"):
+                from dotenv import set_key
+
                 for v, valor in valores.items():
                     if valor.strip():
                         os.environ[v] = valor.strip()
-                # ponytail: los módulos leen las claves al importarse; se reimportan para tomarlas.
-                # La conexión MCP previa al campus queda viva hasta reiniciar la app.
-                for m in list(sys.modules):
-                    if m.split(".")[0] in ("agente", "tools", "llm", "campus"):
-                        del sys.modules[m]
-                st.session_state.pop("config", None)
-                st.rerun()
+                        if recordar:
+                            set_key(ENV_FILE, v, valor.strip())
+                recargar_agente()
 
 
+def recargar_agente() -> None:
+    """Reimporta el agente para que tome las claves o el modelo nuevos."""
+    # ponytail: los módulos leen el entorno al importarse; se reimportan para tomarlo.
+    # La conexión MCP previa al campus queda viva hasta reiniciar la app.
+    for m in list(sys.modules):
+        if m.split(".")[0] in ("agente", "tools", "llm", "campus"):
+            del sys.modules[m]
+    st.session_state.pop("config", None)
+    st.rerun()
+
+
+# Modelos gratis de OpenRouter con tool calling. Los que no se eligen quedan de respaldo ante un 429.
+MODELOS = {
+    "google/gemma-4-31b-it:free": "Gemma 4 31B",
+    "google/gemma-4-26b-a4b-it:free": "Gemma 4 26B",
+    "baidu/ernie-5.5-flash-preview:free": "ERNIE 5.5 Flash",
+    "nvidia/nemotron-3.5-super-vl:free": "Nemotron 3.5 Super",
+    "thinkingmachines/inkling-2-small:free": "Inkling 2 Small",
+}
+
+
+def render_modelo() -> None:
+    """Selector de modelo (el Model Selector del Prompt Input de shadcn, sin el effort)."""
+    actual = os.getenv("MODEL_NAME", "google/gemma-4-31b-it:free")
+    opciones = list(MODELOS) if actual in MODELOS else [actual, *MODELOS]
+    elegido = SB_PIE.selectbox("Modelo", opciones, index=opciones.index(actual),
+                               format_func=lambda m: MODELOS.get(m, m),
+                               help="Gratis en OpenRouter. Si da 429, se prueban los respaldos.")
+    if elegido != actual:
+        from dotenv import set_key
+
+        os.environ["MODEL_NAME"] = elegido
+        set_key(ENV_FILE, "MODEL_NAME", elegido)   # local: se recuerda al reiniciar
+        recargar_agente()
+
+
+# Estructura del Sidebar de shadcn: header (marca), content (grupos) y footer (claves).
+# Los contenedores se crean en orden y se llenan después: las claves van al pie aunque
+# se dibujen antes de importar el agente (si faltan, el import falla).
+SB_CABECERA, SB_CONTENIDO, SB_PIE = st.sidebar.container(), st.sidebar.container(), st.sidebar.container()
+SB_CABECERA.markdown(
+    '<div class="sb-head"><div class="sb-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M21.42 10.92a1 1 0 0 0-.02-1.84L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.83l8.57 3.91a2 2 0 0 0 1.66 0z"/>'
+    '<path d="M22 10v6M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></svg></div>'
+    '<div><b>Generador estud.ia</b><small>UTN FRM</small></div></div>', unsafe_allow_html=True)
+render_modelo()
 render_claves()
 
 try:
     from agente import (
-        adaptador, list_threads, new_thread, resume_thread, saved_turns, select_thread, stream_turn,
+        list_threads, new_thread, resume_thread, saved_turns, select_thread, stream_turn,
     )
     from tools import materias_con_bibliografia
 except RuntimeError as e:   # p. ej. faltan claves en el .env
@@ -112,58 +210,90 @@ except RuntimeError as e:   # p. ej. faltan claves en el .env
     st.stop()
 
 ESTUDIA_URL = "https://estud-ia-blond.vercel.app/"
-PASOS_EXPANDIDOS = False   # True: las tools se muestran desplegadas
-
-
 def init_session(config) -> None:
     st.session_state.config = config
     st.session_state.historial = saved_turns(config)   # lista de (pedido, eventos)
 
 
-def titulo_llamada(e: dict) -> str:
+# Verbos de cada tool: (en curso, terminó, falló). Siguen los estados del componente Tool.
+VERBOS = {
+    "buscar_bibliografia": ("Buscando en", "Buscó en", "Falló la búsqueda en"),
+    "explorar_campus": ("Consultando", "Consultó", "Falló al consultar"),
+    "buscar_en_internet": ("Buscando en", "Buscó en", "Falló la búsqueda en"),
+    "generar_banco_estudia": ("Generando", "Generó", "Falló al generar"),
+}
+# Color de cada tool (clase CSS). Sin rojos, naranjas ni amarillos: los cálidos quedan
+# solo para los errores, así un fallo se distingue de un vistazo.
+COLOR_TOOL = {"buscar_bibliografia": "violeta", "explorar_campus": "verde",
+              "buscar_en_internet": "azul", "generar_banco_estudia": "grafito"}
+ICONO_TOOL = {"buscar_bibliografia": "libro", "explorar_campus": "campus",
+              "buscar_en_internet": "globo", "generar_banco_estudia": "banco"}
+
+
+def objeto_llamada(e: dict) -> str:
+    """Lo que hace la tool, sin verbo: «la bibliografía de X: "consulta"»."""
     nombre, args = e["nombre"], e["args"]
     if nombre == "buscar_bibliografia":
-        return f"📚 1 · Bibliografía de {args.get('materia', '?')}: «{args.get('consulta', '')}»"
+        return f"la bibliografía de {args.get('materia', '?')}: «{args.get('consulta', '')}»"
     if nombre == "explorar_campus":
-        detalle = args.get("url") or args.get("course_id") or ""
-        return f"🏫 2 · Campus UTN FRM: {args.get('accion', '')} {detalle}".strip()
+        accion = args.get("accion", "")
+        if accion == "leer":
+            desde = f" (desde el carácter {args['desde']})" if args.get("desde") else ""
+            return f"el campus: leer {args.get('url', '')}{desde}"
+        if accion == "contenido":
+            return f"el campus: contenido del curso {args.get('course_id', '')}"
+        return "el campus: materias"
     if nombre == "buscar_en_internet":
-        return f"🌐 3 · Internet: «{args.get('consulta', '')}»"
+        return f"internet: «{args.get('consulta', '')}»"
     if nombre == "generar_banco_estudia":
         tipos = ", ".join(args.get("tipos") or []) or "tipos mezclados"
-        return f"🧩 4 · Generar banco: {args.get('cantidad', 10)} preguntas ({tipos})"
-    return f"🔧 {nombre}"
+        return f"el banco: {args.get('cantidad', 10)} preguntas ({tipos})"
+    return nombre
 
 
-def detalle_resultado(llamada: dict, r: dict) -> str | None:
-    """Resumen de lo que devolvió la tool. Devuelve "error" si la tool falló."""
-    nombre, datos = llamada["nombre"], r["datos"]
-    st.caption("Argumentos")
-    st.json(llamada["args"], expanded=False)
-    st.caption("Resultado")
+def fallo(llamada: dict, r: dict) -> bool:
+    nombre, datos, texto = llamada["nombre"], r["datos"], r["texto"]
     if nombre == "buscar_bibliografia":
-        fragmentos = (datos or {}).get("fragmentos", [])
-        if not fragmentos:
-            st.warning(r["texto"])
-            return "error"
-        for f in fragmentos:
-            st.markdown(f"- 📄 **{f['libro']}**, págs. {f['paginas']} "
-                        f"(similitud {f['similitud']}): _{f['vista']}…_")
-    elif nombre == "buscar_en_internet" and isinstance(datos, list) and datos:
-        for f in datos:
-            st.markdown(f"- [{f['titulo']}]({f['url']})")
-    elif nombre == "generar_banco_estudia":
-        if not (isinstance(datos, dict) and datos.get("ok")):
-            st.warning(r["texto"])
-            return "error"
-        st.markdown(f"✅ {datos['preguntas']} preguntas válidas en {datos['intentos']} intento(s).")
-        st.markdown("**Fuentes usadas:**\n" + "\n".join(f"- {f}" for f in datos["fuentes"]))
+        return not (datos or {}).get("fragmentos")
+    if nombre == "generar_banco_estudia":
+        return not (isinstance(datos, dict) and datos.get("ok"))
+    return texto.startswith(("No se pudo", "El campus no", "Falta", "La búsqueda web falló"))
+
+
+def salida_tool(llamada: dict, r: dict) -> str:
+    """Cuerpo desplegable: entrada (args) y salida, como bloques de código."""
+    from html import escape
+
+    nombre, datos = llamada["nombre"], r["datos"]
+    if nombre == "buscar_bibliografia" and (datos or {}).get("fragmentos"):
+        salida = "\n".join(f"📄 {f['libro']}, págs. {f['paginas']} (similitud {f['similitud']}): {f['vista']}…"
+                           for f in datos["fragmentos"])
+    elif nombre == "generar_banco_estudia" and isinstance(datos, dict) and datos.get("ok"):
+        salida = (f"✅ {datos['preguntas']} preguntas válidas en {datos['intentos']} intento(s).\n"
+                  "Fuentes usadas:\n" + "\n".join(f"- {f}" for f in datos["fuentes"]))
     else:
         texto = r["texto"]
-        st.text(texto[:800] + ("…" if len(texto) > 800 else ""))
-        if texto.startswith(("No se pudo", "El campus no", "Falta", "La búsqueda web falló")):
-            return "error"
-    return None
+        salida = texto[:2000] + ("…" if len(texto) > 2000 else "")
+    entrada = json.dumps(llamada["args"], ensure_ascii=False, indent=2)
+    return (f'<div class="tr-label">Entrada</div><pre class="tr-code">{escape(entrada)}</pre>'
+            f'<div class="tr-label">Salida</div><pre class="tr-code">{escape(salida)}</pre>')
+
+
+def html_tool(llamada: dict, r: dict | None = None) -> str:
+    """Línea de una tool: girando mientras corre; al terminar, desplegable con la salida."""
+    from html import escape
+
+    corriendo, terminado, fallido = VERBOS.get(llamada["nombre"], ("Ejecutando", "Ejecutó", "Falló"))
+    objeto = escape(objeto_llamada(llamada))
+    ico = icono(ICONO_TOOL.get(llamada["nombre"], "archivo"))
+    color = f' tr-{COLOR_TOOL.get(llamada["nombre"], "gris")}'
+    if r is None:
+        return (f'<div class="tr{color}"><div class="tr-line tr-running" role="status">'
+                f'<span class="tr-spin" aria-hidden="true"></span><span>{corriendo} {objeto}</span></div></div>')
+    error = fallo(llamada, r)
+    clase, verbo = (" tr-error", fallido) if error else (color, terminado)
+    return (f'<details class="tr{clase}"><summary>{icono("error") if error else ico}<span>{verbo} {objeto}</span>'
+            f'{icono("chevron", "tr-chev")}</summary><div class="tr-body">{salida_tool(llamada, r)}</div></details>')
 
 
 def render_banco(texto: str, clave: str) -> bool:
@@ -202,6 +332,9 @@ ICONOS = {   # trazos de lucide, en línea para no sumar dependencias
     "check": '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
     "flecha": '<path d="M7 7h10v10M7 17 17 7"/>',
     "chevron": '<path d="m9 18 6-6-6-6"/>',
+    "campus": '<path d="M21.42 10.92a1 1 0 0 0-.02-1.84L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.83l8.57 3.91a2 2 0 0 0 1.66 0z"/><path d="M22 10v6M6 12.5V16a6 3 0 0 0 12 0v-3.5"/>',
+    "banco": '<path d="M13 5h8M13 12h8M13 19h8m-18-2 2 2 4-4M3 7l2 2 4-4"/>',
+    "error": '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6m0-6 6 6"/>',
 }
 
 
@@ -215,7 +348,7 @@ def html_razonamiento(texto: str) -> str:
     """Línea "Pensó" que se despliega con el razonamiento (Reasoning de shadcn)."""
     from html import escape
 
-    return (f'<details class="tr"><summary>{icono("check")}<span>Pensó</span>'
+    return (f'<details class="tr tr-pensar"><summary>{icono("check")}<span>Pensó</span>'
             f'{icono("chevron", "tr-chev")}</summary><div class="tr-body tr-pre">{escape(texto.strip())}</div></details>')
 
 
@@ -262,7 +395,7 @@ def html_fuentes(fuentes: list[dict]) -> str:
 def render_eventos(eventos) -> list[dict]:
     """Dibuja los eventos a medida que llegan (en vivo o desde el historial)."""
     emitidos = []
-    llamadas = {}   # id del tool call -> (evento de la llamada, contenedor st.status)
+    llamadas = {}   # id del tool call -> (evento de la llamada, línea que se actualiza en el lugar)
     plan, pasos, ids_plan = None, [], set()   # el plan se dibuja una vez y se actualiza en el lugar
     for e in eventos:
         emitidos.append(e)
@@ -286,42 +419,53 @@ def render_eventos(eventos) -> list[dict]:
             else:
                 st.markdown(e["texto"])
         elif tipo == "llamada":
-            status = st.status(titulo_llamada(e), expanded=PASOS_EXPANDIDOS)   # "running" hasta el resultado
-            llamadas[e["id"]] = (e, status)
+            linea = st.empty()   # "en curso" hasta que llega el resultado
+            linea.markdown(html_tool(e), unsafe_allow_html=True)
+            llamadas[e["id"]] = (e, linea)
         elif tipo == "resultado" and e["id"] in llamadas:
-            llamada, status = llamadas[e["id"]]
-            with status:
-                estado = detalle_resultado(llamada, e)
-            status.update(state=estado or "complete")
+            llamada, linea = llamadas[e["id"]]
+            linea.markdown(html_tool(llamada, e), unsafe_allow_html=True)
+    resueltas = {e["id"] for e in emitidos if e["tipo"] == "resultado"}
+    for id_llamada, (llamada, linea) in llamadas.items():
+        if id_llamada not in resueltas:   # el turno terminó sin su resultado: falló
+            linea.markdown(html_tool(llamada, {"datos": None, "texto": "No se pudo completar: el turno terminó antes."}),
+                           unsafe_allow_html=True)
     if fuentes := fuentes_del_turno(emitidos):
         st.markdown(html_fuentes(fuentes), unsafe_allow_html=True)
     return emitidos
 
 
 def render_sidebar() -> None:
-    actual = st.session_state.config["configurable"]["thread_id"]
-    with st.sidebar:
-        st.header("🎓 Generador estud.ia")
-        st.caption(f"Modelo: `{adaptador}`")
-        st.subheader("Bibliografía cargada")
-        materias = materias_con_bibliografia()
-        if materias:
-            for materia, libros in materias.items():
-                st.markdown(f"**{materia}**: " + ", ".join(libros))
-        else:
-            st.warning("No hay libros indexados. Ejecutá `python -m rag.ingest`.")
+    """Content: conversaciones y bibliografía. Footer: modelo y link a estud.ia (las claves ya están)."""
+    from html import escape
 
-        st.subheader("Conversaciones")
-        if st.button("➕ Nueva conversación", disabled=not st.session_state.historial):
+    actual = st.session_state.config["configurable"]["thread_id"]
+    with SB_CONTENIDO:
+        st.markdown('<div class="sb-label">Conversaciones</div>', unsafe_allow_html=True)
+        if st.button("Nueva conversación", icon=":material/add:", type="tertiary",
+                     disabled=not st.session_state.historial):
             init_session(new_thread())
             st.rerun()
         for thread_id, titulo in list_threads():
-            if st.button(titulo, key=thread_id, disabled=thread_id == actual,
-                         use_container_width=True):
+            # la activa va deshabilitada: el CSS la marca como seleccionada (isActive)
+            if st.button(titulo, key=thread_id, icon=":material/chat_bubble_outline:", type="tertiary",
+                         disabled=thread_id == actual):
                 init_session(select_thread(thread_id))
                 st.rerun()
-        st.divider()
-        st.markdown(f"[Abrir estud.ia ↗]({ESTUDIA_URL})")
+
+        st.markdown('<div class="sb-label">Bibliografía</div>', unsafe_allow_html=True)
+        materias = materias_con_bibliografia()
+        if not materias:
+            st.warning("No hay libros indexados. Ejecutá `python -m rag.ingest`.")
+        for materia, libros in materias.items():
+            sub = "".join(f"<div title='{escape(l)}'>{escape(l)}</div>" for l in libros)
+            st.markdown(f'<div class="sb-item">{icono("libro")}<span>{escape(materia)}</span>'
+                        f'<span class="sb-badge">{len(libros)}</span></div><div class="sb-sub">{sub}</div>',
+                        unsafe_allow_html=True)
+    with SB_PIE:
+        st.markdown(f'<a class="sb-item" href="{ESTUDIA_URL}" target="_blank" rel="noreferrer">{icono("flecha")}'
+                    f'<span>Abrir estud.ia<span class="sr-only"> (se abre en otra pestaña)</span></span></a>',
+                    unsafe_allow_html=True)
 
 
 if "config" not in st.session_state:
