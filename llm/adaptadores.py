@@ -81,7 +81,24 @@ def _chat_openai_con_razonamiento():
                 razonamiento = mensaje.get("reasoning") or mensaje.get("reasoning_content")
                 if razonamiento:
                     generacion.message.additional_kwargs["reasoning_content"] = razonamiento
+                if mensaje.get("reasoning_details"):
+                    generacion.message.additional_kwargs["reasoning_details"] = mensaje["reasoning_details"]
             return result
+
+        def _get_request_payload(self, input_, *, stop=None, **kwargs):
+            """Reenvía el razonamiento de cada respuesta anterior (`reasoning_details`).
+
+            Sin esto, los modelos razonan solo en la primera llamada del turno y
+            después eligen las tools "a ciegas": OpenRouter pide devolverlo tal cual
+            en los mensajes del asistente para que sigan pensando entre tools.
+            """
+            payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+            mensajes = self._convert_input(input_).to_messages()
+            for original, enviado in zip(mensajes, payload.get("messages", [])):
+                detalles = original.additional_kwargs.get("reasoning_details")
+                if original.type == "ai" and detalles:
+                    enviado["reasoning_details"] = detalles
+            return payload
 
     return ChatOpenAIConRazonamiento
 
