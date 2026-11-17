@@ -12,14 +12,14 @@ conversación (resultados de `buscar_bibliografia`, `explorar_campus`,
 definiciones que contradigan la bibliografía de la cátedra.
 
 ## Pasos
-
-1. Revisá que ya hayas consultado `buscar_bibliografia`. Si no, hacelo antes de seguir.
-2. Escribí el banco completo en JSON siguiendo el formato y las reglas de abajo.
-3. Llamá a `guardar_banco_estudia` con:
+1. Comprueba que la cantidad de las preguntas no excedan al maximo establecido en las reglas
+2. Revisá que ya hayas consultado `buscar_bibliografia`. Si no, hacelo antes de seguir.
+3. Escribí el banco completo en JSON siguiendo el formato y las reglas de abajo.
+4. Llamá a `guardar_banco_estudia` con:
    - `banco_json`: el JSON completo, como texto, sin bloques de código ni texto alrededor.
    - `cantidad`: la cantidad de preguntas pedida (10 si el alumno no dijo).
    - `tipos`: los tipos pedidos por el alumno (vacío si no pidió ninguno).
-4. Si `guardar_banco_estudia` devuelve errores de validación, corregí SOLO esos
+5. Si `guardar_banco_estudia` devuelve errores de validación, corregí SOLO esos
    errores y volvé a llamarla con el JSON completo corregido. Tenés hasta 3 intentos
    por pedido. Si devuelve el banco validado, terminaste: no escribas nada más.
 
@@ -67,7 +67,8 @@ de responder). Los tipos posibles son:
 - Comillas dobles, sin comas finales y sin comentarios: tiene que ser JSON válido.
 - Si el alumno pidió tipos de pregunta, usá SOLO esos. Si no, mezclá los tipos y cubrí
   todos los temas importantes del material.
-- Generá exactamente la cantidad de preguntas pedida (10 si no dijo; máximo 30).
+- Generá exactamente la cantidad de preguntas pedida (10 si no dijo; máximo 20) Si la cantidad de preguntas pedidas excede el maximo, avisa al usuario que se supero el maximo y genera solo la cantidad maxima.
+
 - Usá un `"titulo"` corto con la materia y los temas, p. ej. "Modelos de Lenguaje - Transformers".
 - Las preguntas tienen que cubrir todos los temas pedidos.
 - Incluí siempre `"explicacion"` justificando la respuesta según el material de la cátedra,
