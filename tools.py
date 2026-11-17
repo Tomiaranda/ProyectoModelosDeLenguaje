@@ -1,15 +1,18 @@
-"""Las 4 tools del agente y su estado.
+"""Las tools del agente y su estado.
 
 Orden de uso que impone el system prompt (ver agente.py):
     1. buscar_bibliografia   RAG sobre los libros oficiales de la cátedra (SQLite)
     2. explorar_campus       Campus Virtual UTN FRM vía MCP
     3. buscar_en_internet    DuckDuckGo, opcional, sin API key
-    4. generar_banco_estudia arma y valida el JSON para estud.ia (cierre)
+    4. cargar_skill          carga la skill `generar-banco-estudia` (skills/)
+       guardar_banco_estudia valida y guarda el JSON que escribió el agente (cierre)
 
 Las tres primeras guardan lo que encuentran en el estado del agente
-(`material`). La generadora lee ese material del estado: el modelo no tiene que
-volver a escribirlo como argumento (ahorra tokens y evita que lo deforme), y
-puede comprobar que la bibliografía oficial se consultó antes de generar.
+(`material`). La generación del banco ya no es una tool que llama a otro LLM:
+es una skill (instrucciones en `skills/generar-banco-estudia/SKILL.md`) que el
+propio agente carga y sigue para escribir el JSON. `guardar_banco_estudia`
+hace cumplir en código lo que antes hacía la tool generadora: exige que se haya
+consultado la bibliografía, valida el JSON, limita los reintentos y lo guarda.
 
 Todas atrapan sus errores y los devuelven como texto: un fallo nunca corta el
 flujo del agente, el modelo lee el error y decide cómo seguir.
@@ -29,10 +32,10 @@ from pydantic import BaseModel, Field
 
 from campus.archivos import extraer_texto
 from campus.cliente_mcp import CampusNoConfigurado, campus
-from estudia.formato import SISTEMA_GENERADOR, armar_prompt
 from estudia.validador import extraer_json, validar_banco
-from llm import obtener_adaptador, obtener_embeddings
+from llm import obtener_embeddings
 from rag import store
+from skills import cargar_skills
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output"
@@ -43,8 +46,9 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 MAX_CHARS_FRAGMENTO_LIBRO = 2200   # ~550 tokens por fragmento de 2 páginas
 MAX_CHARS_CAMPUS = 5000            # contenido de una materia o un archivo
 MAX_CHARS_WEB = 600                # por resultado
-MAX_CHARS_MATERIAL = 16000         # total que recibe la generadora (~4k tokens)
-INTENTOS_GENERACION = 3
+MAX_CHARS_MATERIAL = 16000         # adjuntos que se entregan junto con la skill (~4k tokens)
+INTENTOS_GENERACION = 3            # llamadas a guardar_banco_estudia por turno
+SKILL_BANCO = "generar-banco-estudia"
 
 TipoPregunta = Literal[
     "multiple_choice", "seleccion_multiple", "verdadero_falso",
@@ -273,31 +277,83 @@ def buscar_en_internet(consulta: str, runtime: ToolRuntime[Contexto]) -> Command
                       artifact=fuentes, material=material)
 
 
-# --- 4. Generadora de práctica para estud.ia -------------------------------------------
+# --- 4. Skill de generación para estud.ia ----------------------------------------------
 
-def _material_para_generar(material: list[dict], turno: int) -> tuple[str, list[dict]]:
+SKILLS = cargar_skills()
+
+
+def _material_del_turno(material: list[dict], turno: int) -> list[dict]:
     """Material del turno actual; si no hay (p. ej. "agregá 5 más"), el del último turno con material.
 
-    Se ordena adjuntos -> libro -> campus -> web y se recorta al presupuesto total.
+    Se ordena adjuntos -> libro -> campus -> web.
     """
     if not material:
-        return "", []
+        return []
     turnos = [m["turno"] for m in material]
     elegido = turno if turno in turnos else max(turnos)
     seleccion = [m for m in material if m["turno"] == elegido]
     prioridad = {"adjunto": -1, "libro": 0, "campus": 1, "web": 2}   # lo que subió el alumno, primero
     seleccion.sort(key=lambda m: prioridad.get(m["origen"], 3))
-    partes, total, usadas = [], 0, []
-    for m in seleccion:
-        bloque = f"### {m['fuente']}\n{m['texto']}"
-        if total + len(bloque) > MAX_CHARS_MATERIAL:
-            bloque = bloque[:MAX_CHARS_MATERIAL - total]
+    return seleccion
+
+
+def _texto_adjuntos(material: list[dict]) -> str:
+    """Texto de los archivos subidos por el alumno, recortado al presupuesto.
+
+    Es el único material que el modelo no vio como resultado de una tool, así que
+    viaja junto con las instrucciones de la skill. Libro, campus y web ya están en
+    la conversación: repetirlos solo gastaría tokens.
+    """
+    partes, total = [], 0
+    for m in material:
+        if m["origen"] != "adjunto":
+            continue
+        bloque = f"### {m['fuente']}\n{m['texto']}"[:MAX_CHARS_MATERIAL - total]
         if len(bloque) < 200:
             break
         partes.append(bloque)
-        usadas.append(m)
         total += len(bloque)
-    return "\n\n".join(partes), usadas
+    return "\n\n".join(partes)
+
+
+def _mensajes_del_turno(mensajes: list) -> list:
+    """Mensajes desde el último pedido del alumno (los recordatorios del sistema no cuentan)."""
+    turno = []
+    for m in reversed(mensajes):
+        if m.type == "human" and not m.additional_kwargs.get("recordatorio", False):
+            break
+        turno.append(m)
+    return turno
+
+
+def _llamadas(mensajes: list, nombre: str) -> int:
+    return sum(c["name"] == nombre for m in mensajes if m.type == "ai" for c in m.tool_calls)
+
+
+@tool
+def cargar_skill(nombre: str, runtime: ToolRuntime[Contexto]) -> Command:
+    """Carga las instrucciones completas de una skill (ver la lista en el system prompt).
+
+    Llamala antes de hacer la tarea de la skill y seguí sus instrucciones al pie de
+    la letra. Para cerrar un pedido usá la skill "generar-banco-estudia".
+
+    Args:
+        nombre: nombre de la skill, p. ej. "generar-banco-estudia".
+    """
+    skill = SKILLS.get(nombre.strip())
+    if skill is None:
+        disponibles = ", ".join(SKILLS) or "ninguna"
+        return _responder(runtime, f"No existe la skill «{nombre}». Skills disponibles: {disponibles}.")
+    texto = skill.instrucciones
+    fuentes: list[str] = []
+    if skill.nombre == SKILL_BANCO:
+        seleccion = _material_del_turno(runtime.state.get("material", []), runtime.context.turno)
+        fuentes = sorted({m["fuente"] for m in seleccion})
+        if fuentes:
+            texto += "\n\n## Fuentes recopiladas (para citar)\n" + "\n".join(f"- {f}" for f in fuentes)
+        if adjuntos := _texto_adjuntos(seleccion):
+            texto += "\n\n## Material adjunto por el alumno (tiene prioridad)\n" + adjuntos
+    return _responder(runtime, texto, artifact={"skill": skill.nombre, "fuentes": fuentes})
 
 
 def _guardar(banco: dict) -> Path:
@@ -308,77 +364,52 @@ def _guardar(banco: dict) -> Path:
 
 
 @tool
-def generar_banco_estudia(titulo: str, temas: str, runtime: ToolRuntime[Contexto],
-                          cantidad: int = 10, tipos: list[TipoPregunta] | None = None,
-                          descripcion: str = "", indicaciones: str = "") -> Command:
-    """ÚLTIMO PASO OBLIGATORIO. Genera y valida el banco de preguntas JSON para estud.ia.
+def guardar_banco_estudia(banco_json: str, runtime: ToolRuntime[Contexto],
+                          cantidad: int = 10, tipos: list[TipoPregunta] | None = None) -> Command:
+    """ÚLTIMO PASO OBLIGATORIO de la skill "generar-banco-estudia". Valida y guarda el banco.
 
-    Usa automáticamente todo el material recopilado en este turno con las otras
-    tools (libro, campus, web): NO hace falta pasarle el material. Si la
-    validación falla, la herramienta reintenta sola. Su resultado ES la
-    respuesta final para el alumno.
+    Recibe el JSON que escribiste siguiendo la skill. Si es válido, lo guarda y ES la
+    respuesta final para el alumno. Si no, devuelve los errores: corregilos y volvé a
+    llamarla con el JSON completo (hasta 3 intentos por pedido).
 
     Args:
-        titulo: nombre corto del test, p. ej. "Modelos de Lenguaje - Transformers".
-        temas: temas que deben cubrir las preguntas, separados por coma.
-        cantidad: número de preguntas (1 a 30). 10 si el alumno no dijo cuántas.
+        banco_json: el banco completo en JSON, como texto.
+        cantidad: número de preguntas pedido (1 a 30). 10 si el alumno no dijo cuántas.
         tipos: tipos de pregunta pedidos por el alumno; vacío = mezclar todos.
-        descripcion: descripción breve del test.
-        indicaciones: pedidos extra del alumno (dificultad, enfoque, etc.).
     """
     cantidad = max(1, min(int(cantidad or 10), 30))
-    material = runtime.state.get("material", [])
-    consulto_libros = any(
-        call["name"] == buscar_bibliografia.name
-        for m in runtime.state.get("messages", []) if m.type == "ai"
-        for call in m.tool_calls
-    )
-    if not consulto_libros:   # la jerarquía libro -> campus -> web se hace cumplir en código
+    mensajes = runtime.state.get("messages", [])
+    if not _llamadas(mensajes, buscar_bibliografia.name):   # libro -> campus -> web, en código
         return _responder(
             runtime,
             "Todavía no consultaste la bibliografía oficial. Primero usá buscar_bibliografia "
             "con la materia y cada tema; después, explorar_campus; y recién entonces generá.",
         )
-    texto_material, usadas = _material_para_generar(material, runtime.context.turno)
-    if not texto_material:
-        return _responder(runtime, "No hay material recopilado: consultá primero las fuentes.")
-
-    prompt = armar_prompt(cantidad, list(tipos or []), texto_material, titulo, temas, indicaciones)
+    # El AIMessage con esta llamada ya está en el estado: cuenta como intento.
+    intento = _llamadas(_mensajes_del_turno(mensajes), guardar_banco_estudia.name)
     try:
-        adaptador = obtener_adaptador()
-    except Exception as e:   # noqa: BLE001
-        return _responder(runtime, f"No se pudo crear el modelo generador: {e}")
-
-    errores: list[str] = []
-    respuesta = ""
-    for intento in range(1, INTENTOS_GENERACION + 1):
-        pedido = prompt
-        if errores:
-            pedido += (
-                "\n\nTu respuesta anterior tenía estos errores; devolvé el JSON completo corregido:\n- "
-                + "\n- ".join(errores[:15]) + f"\n\nRespuesta anterior:\n{respuesta[:6000]}"
-            )
-        try:
-            respuesta = adaptador.completar(SISTEMA_GENERADOR, pedido)
-            banco = extraer_json(respuesta)
-            errores = validar_banco(banco, cantidad, list(tipos or []))
-        except Exception as e:   # noqa: BLE001 - JSON inválido o error del proveedor
-            errores = [f"No se pudo leer el JSON: {e}"]
-            continue
-        if not errores:
-            break
+        banco = extraer_json(banco_json)
+        errores = validar_banco(banco, cantidad, list(tipos or []))
+    except Exception as e:   # noqa: BLE001 - JSON inválido
+        errores = [f"No se pudo leer el JSON: {e}"]
     if errores:
+        if intento >= INTENTOS_GENERACION:
+            return _responder(
+                runtime,
+                f"No se logró un banco válido en {INTENTOS_GENERACION} intentos. Errores: "
+                + "; ".join(errores[:8]) + ". Avisale al alumno y sugerile pedir menos preguntas.",
+            )
         return _responder(
             runtime,
-            f"No se logró un banco válido en {INTENTOS_GENERACION} intentos. Errores: "
-            + "; ".join(errores[:8]) + ". Podés reintentar con menos preguntas.",
+            f"Intento {intento} de {INTENTOS_GENERACION}: el banco tiene estos errores. Corregilos y "
+            "volvé a llamar a guardar_banco_estudia con el JSON completo corregido:\n- "
+            + "\n- ".join(errores[:15]),
         )
 
-    banco["titulo"] = banco.get("titulo") or titulo
-    if descripcion and not banco.get("descripcion"):
-        banco["descripcion"] = descripcion
+    banco["titulo"] = banco.get("titulo") or "Banco de preguntas"
     ruta = _guardar(banco)
     contenido = json.dumps(banco, ensure_ascii=False, indent=2)
+    usadas = _material_del_turno(runtime.state.get("material", []), runtime.context.turno)
     return _responder(
         runtime,
         contenido,
@@ -393,11 +424,12 @@ def generar_banco_estudia(titulo: str, temas: str, runtime: ToolRuntime[Contexto
     )
 
 
-TOOLS: list = [plan, buscar_bibliografia, explorar_campus, buscar_en_internet, generar_banco_estudia]
+TOOLS: list = [plan, buscar_bibliografia, explorar_campus, buscar_en_internet,
+               cargar_skill, guardar_banco_estudia]
 
 
 def banco_generado(mensaje) -> str | None:
-    """JSON validado si `mensaje` es un resultado exitoso de generar_banco_estudia."""
+    """JSON validado si `mensaje` es un resultado exitoso de guardar_banco_estudia."""
     datos = getattr(mensaje, "artifact", None)
     if getattr(mensaje, "type", "") == "tool" and isinstance(datos, dict) and datos.get("ok"):
         return datos["json"]

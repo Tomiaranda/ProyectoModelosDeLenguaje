@@ -21,7 +21,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from llm import obtener_adaptador
-from tools import TOOLS, Contexto, EstadoEstudio, banco_generado, materias_con_bibliografia
+from skills import catalogo
+from tools import SKILLS, TOOLS, Contexto, EstadoEstudio, banco_generado, materias_con_bibliografia
 
 HOY = date.today()
 
@@ -34,13 +35,16 @@ El alumno te dice la MATERIA y los TEMAS (y opcionalmente la cantidad y los tipo
 1. PRIMERO, bibliografía oficial: llamá a `buscar_bibliografia` con la materia y una consulta concreta por cada tema pedido. Es la fuente principal: las definiciones y conceptos tienen que salir de ahí.
 2. SEGUNDO, campus UTN FRM: usá `explorar_campus` para ver el enfoque de los docentes. Empezá con accion="materias", buscá la materia, pedí accion="contenido" y leé con accion="leer" los 1 o 2 archivos (filminas, apuntes, guías) más relacionados con los temas. Si el campus no está disponible, seguí.
 3. TERCERO, OPCIONAL: usá `buscar_en_internet` solo si después del libro y del campus falta un concepto muy actual, una herramienta técnica o un ejemplo práctico. No la uses si el material alcanza.
-4. CUARTO, cierre OBLIGATORIO: llamá a `generar_banco_estudia` con un título corto, los temas, la cantidad (10 si el alumno no dijo) y los tipos pedidos (vacío si no pidió ninguno). Esa tool ya lee todo el material recopilado: no lo copies en los argumentos. Su resultado es la respuesta final.
+4. CUARTO, cierre OBLIGATORIO con la skill `generar-banco-estudia`: llamá a `cargar_skill` con ese nombre, seguí sus instrucciones para escribir vos mismo el banco en JSON con el material recopilado y entregalo con `guardar_banco_estudia` (cantidad: 10 si el alumno no dijo; tipos: vacío si no pidió ninguno). Si devuelve errores, corregilos y volvé a llamarla. Cuando el banco es válido, ese es el resultado final.
+
+Skills disponibles (cargalas con `cargar_skill` cuando las necesites; no hace falta volver a cargar una que ya cargaste en esta conversación):
+{catalogo(SKILLS)}
 
 Reglas:
 - No respondas preguntas de teoría ni charles: todo pedido termina en un banco de preguntas. Si falta la materia o los temas, pedilos en una sola oración.
-- Si el mensaje trae «📎 Adjuntos», el texto de esos archivos ya está en el material y tiene prioridad: igual buscá en la bibliografía, pero no hace falta buscarlos en el campus.
+- Si el mensaje trae «📎 Adjuntos», el texto de esos archivos se te entrega al cargar la skill y tiene prioridad: igual buscá en la bibliografía, pero no hace falta buscarlos en el campus.
 - Si una tool devuelve un error, leelo y seguí con el siguiente paso; no repitas la misma llamada más de 2 veces.
-- Si el alumno pide cambios sobre un banco anterior ("agregá 5 de verdadero/falso", "hacelo más difícil"), usá la conversación previa: no hace falta volver a buscar si el material ya está, llamá directamente a `generar_banco_estudia` con los nuevos parámetros, salvo que pida temas nuevos.
+- Si el alumno pide cambios sobre un banco anterior ("agregá 5 de verdadero/falso", "hacelo más difícil"), usá la conversación previa: no hace falta volver a buscar si el material ya está, aplicá la skill directamente con los nuevos parámetros, salvo que pida temas nuevos.
 - Materias con bibliografía cargada: {", ".join(materias_con_bibliografia()) or "ninguna todavía"}."""
 
 DIR = Path(__file__).parent
@@ -49,7 +53,7 @@ CONV_FILE = DIR / "conversaciones.txt"   # un thread_id por línea; el último e
 
 @before_model(can_jump_to=["end"])
 def cerrar_con_json(state: EstadoEstudio, runtime) -> dict | None:
-    """Middleware propio: si la tool generadora devolvió un banco válido, termina el turno.
+    """Middleware propio: si guardar_banco_estudia validó el banco, termina el turno.
 
     La respuesta final pasa a ser el JSON validado, tal cual: el modelo no lo
     vuelve a escribir (no puede deformarlo) y se ahorra una llamada al LLM, que
@@ -64,8 +68,9 @@ def cerrar_con_json(state: EstadoEstudio, runtime) -> dict | None:
 
 
 RECORDATORIO = (
-    "[recordatorio del sistema] Ya consultaste las fuentes de este pedido. Ahora llamá a "
-    "generar_banco_estudia con el título, los temas, la cantidad y los tipos pedidos."
+    "[recordatorio del sistema] Ya consultaste las fuentes de este pedido. Ahora cargá la skill "
+    "generar-banco-estudia con cargar_skill (si no la cargaste), escribí el banco y entregalo "
+    "con guardar_banco_estudia."
 )
 
 
@@ -77,7 +82,7 @@ def _es_recordatorio(m) -> bool:
 def exigir_cierre(state: EstadoEstudio, runtime) -> dict | None:
     """Middleware propio: red de seguridad para el paso 4 (cierre obligatorio).
 
-    Si el modelo termina el turno sin llamar a la generadora pero ya consultó
+    Si el modelo termina el turno sin entregar el banco con guardar_banco_estudia pero ya consultó
     la bibliografía (p. ej. un modelo gratuito que se "pierde" en su
     razonamiento), se le recuerda UNA vez que genere el banco y vuelve al modelo.
     """
@@ -197,7 +202,7 @@ def stream_turn(user_input: str, config: RunnableConfig, turno: int,
                 adjuntos: list[dict] | None = None) -> Iterator[dict]:
     """Ejecuta un turno del agente y emite sus eventos a medida que ocurren.
 
-    `adjuntos`: material de los archivos que subió el alumno (lo lee la generadora).
+    `adjuntos`: material de los archivos que subió el alumno (se entrega al cargar la skill).
     """
     vistos = len(saved_state(config).get("messages", []))
     # stream_mode="values": tras cada paso llega el estado completo; se emiten solo los mensajes nuevos.

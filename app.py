@@ -169,7 +169,7 @@ def render_claves() -> None:
 
 def _olvidar_agente() -> None:
     for m in list(sys.modules):
-        if m.split(".")[0] in ("agente", "tools", "llm", "campus"):
+        if m.split(".")[0] in ("agente", "tools", "llm", "campus", "skills"):
             del sys.modules[m]
     st.session_state.pop("config", None)
 
@@ -359,14 +359,17 @@ VERBOS = {
     "buscar_bibliografia": ("Buscando en", "Buscó en", "Falló la búsqueda en"),
     "explorar_campus": ("Consultando", "Consultó", "Falló al consultar"),
     "buscar_en_internet": ("Buscando en", "Buscó en", "Falló la búsqueda en"),
-    "generar_banco_estudia": ("Generando", "Generó", "Falló al generar"),
+    "cargar_skill": ("Cargando", "Cargó", "Falló al cargar"),
+    "guardar_banco_estudia": ("Validando", "Validó", "Corrigiendo"),
 }
 # Color de cada tool (clase CSS). Sin rojos, naranjas ni amarillos: los cálidos quedan
 # solo para los errores, así un fallo se distingue de un vistazo.
 COLOR_TOOL = {"buscar_bibliografia": "violeta", "explorar_campus": "verde",
-              "buscar_en_internet": "azul", "generar_banco_estudia": "grafito"}
+              "buscar_en_internet": "azul", "cargar_skill": "grafito",
+              "guardar_banco_estudia": "grafito"}
 ICONO_TOOL = {"buscar_bibliografia": "libro", "explorar_campus": "campus",
-              "buscar_en_internet": "globo", "generar_banco_estudia": "banco"}
+              "buscar_en_internet": "globo", "cargar_skill": "archivo",
+              "guardar_banco_estudia": "banco"}
 
 
 def objeto_llamada(e: dict) -> str:
@@ -384,7 +387,9 @@ def objeto_llamada(e: dict) -> str:
         return "el campus: materias"
     if nombre == "buscar_en_internet":
         return f"internet: «{args.get('consulta', '')}»"
-    if nombre == "generar_banco_estudia":
+    if nombre == "cargar_skill":
+        return f"la skill «{args.get('nombre', '')}»"
+    if nombre == "guardar_banco_estudia":
         tipos = ", ".join(args.get("tipos") or []) or "tipos mezclados"
         return f"el banco: {args.get('cantidad', 10)} preguntas ({tipos})"
     return nombre
@@ -394,7 +399,9 @@ def fallo(llamada: dict, r: dict) -> bool:
     nombre, datos, texto = llamada["nombre"], r["datos"], r["texto"]
     if nombre == "buscar_bibliografia":
         return not (datos or {}).get("fragmentos")
-    if nombre == "generar_banco_estudia":
+    if nombre == "cargar_skill":
+        return texto.startswith("No existe la skill")
+    if nombre == "guardar_banco_estudia":
         return not (isinstance(datos, dict) and datos.get("ok"))
     return texto.startswith(("No se pudo", "El campus no", "Falta", "La búsqueda web falló"))
 
@@ -407,7 +414,7 @@ def salida_tool(llamada: dict, r: dict) -> str:
     if nombre == "buscar_bibliografia" and (datos or {}).get("fragmentos"):
         salida = "\n".join(f"📄 {f['libro']}, págs. {f['paginas']} (similitud {f['similitud']}): {f['vista']}…"
                            for f in datos["fragmentos"])
-    elif nombre == "generar_banco_estudia" and isinstance(datos, dict) and datos.get("ok"):
+    elif nombre == "guardar_banco_estudia" and isinstance(datos, dict) and datos.get("ok"):
         salida = (f"✅ {datos['preguntas']} preguntas válidas en {datos['intentos']} intento(s).\n"
                   "Fuentes usadas:\n" + "\n".join(f"- {f}" for f in datos["fuentes"]))
     else:
@@ -628,7 +635,7 @@ for pregunta, eventos in st.session_state.historial:
         render_eventos(eventos)
 
 def leer_adjuntos(archivos, turno: int) -> list[dict]:
-    """Texto de los archivos adjuntos, como material del turno (lo lee la generadora)."""
+    """Texto de los archivos adjuntos, como material del turno (se entrega al cargar la skill)."""
     import tempfile
     from pathlib import Path
 

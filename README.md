@@ -24,16 +24,19 @@ flowchart TD
     C --> A
     A -->|3. opcional| W[buscar_en_internet<br/>DuckDuckGo sin API key]
     W --> A
-    A -->|4. cierre obligatorio| G[generar_banco_estudia<br/>LLM + validador + reintentos]
+    A -->|4. cierre obligatorio| K[cargar_skill<br/>skills/generar-banco-estudia/SKILL.md]
+    K -->|instrucciones + adjuntos| A
+    A -->|JSON escrito por el agente| G[guardar_banco_estudia<br/>validador + hasta 3 intentos]
+    G -->|errores a corregir| A
     R -. guarda material .-> S[(Estado: material)]
     C -. guarda material .-> S
     W -. guarda material .-> S
-    S -. lee material .-> G
+    S -. adjuntos y fuentes .-> K
     G --> M[Middleware cerrar_con_json<br/>termina el turno con el JSON validado]
     M --> J[JSON para estud.ia<br/>+ output/*.json]
 ```
 
-Las tres tools de búsqueda guardan lo que encuentran en el estado del agente (`material`). La generadora lo lee de ahí, así el modelo no tiene que copiar todo el material en los argumentos de la llamada. Además, la generadora se niega a trabajar si antes no se consultó `buscar_bibliografia`, así que el orden libro → campus → web también se hace cumplir en código, no solo en el prompt.
+La generación del banco es una **skill**: un `SKILL.md` con las instrucciones del formato de estud.ia que el agente carga bajo demanda con `cargar_skill` (el system prompt solo lista su nombre y descripción, así no ocupa contexto hasta que hace falta). Con esas instrucciones el propio agente escribe el JSON a partir del material que ya tiene en la conversación, y lo entrega a `guardar_banco_estudia`, que lo valida, devuelve los errores para que el agente los corrija (hasta 3 intentos por pedido) y lo guarda. Los archivos que sube el alumno no aparecen como resultado de ninguna tool, así que viajan junto con la skill. Además, `guardar_banco_estudia` se niega a guardar si antes no se consultó `buscar_bibliografia`, así que el orden libro → campus → web también se hace cumplir en código, no solo en el prompt.
 
 ## Requisitos
 
@@ -135,7 +138,7 @@ La memoria (`memoria.db`) y los JSON de `output/` se guardan en el disco del con
 
 ## Demo sugerida
 
-1. *"Haceme 8 preguntas de Modelos de Lenguaje sobre tokenización y embeddings."* Se ven en orden las 4 tools y al final el JSON, con un botón para descargarlo.
+1. *"Haceme 8 preguntas de Modelos de Lenguaje sobre tokenización y embeddings."* Se ven en orden las tools de búsqueda, la carga de la skill y la validación, y al final el JSON, con un botón para descargarlo.
 2. *"Agregale 4 de verdadero o falso y hacelo más difícil."* Este turno depende de la **memoria**: reutiliza el material del turno anterior sin volver a buscar.
 3. Cargá el JSON descargado en [estud.ia](https://estud-ia-blond.vercel.app/).
 
@@ -144,7 +147,10 @@ La memoria (`memoria.db`) y los JSON de `output/` se guardan en el disco del con
 ```
 ├── app.py               # UI de Streamlit (streaming de tools y resultado)
 ├── agente.py            # System prompt, create_agent, middleware de cierre, conversaciones
-├── tools.py             # Estado del agente y las 4 tools
+├── tools.py             # Estado del agente, tools de búsqueda, cargar_skill y guardar_banco_estudia
+├── skills/
+│   ├── __init__.py      # Descubre las skills (skills/<nombre>/SKILL.md) y arma el catálogo
+│   └── generar-banco-estudia/SKILL.md   # Instrucciones y formato oficial de estud.ia
 ├── llm/adaptadores.py   # Patrón Adapter: OpenRouter, Gemini, LM Studio + embeddings
 ├── rag/
 │   ├── store.py         # Base vectorial en SQLite (similitud coseno con numpy)
@@ -154,9 +160,9 @@ La memoria (`memoria.db`) y los JSON de `output/` se guardan en el disco del con
 │   ├── cliente_mcp.py   # Cliente MCP (stdio) del servidor campus_mcp.py
 │   └── archivos.py      # Texto de PDF / PPTX / DOCX descargados del campus
 ├── estudia/
-│   ├── formato.py       # Prompt oficial del formato estud.ia
+│   ├── formato.py       # Tipos de pregunta de estud.ia
 │   └── validador.py     # Validación estructural del JSON
-└── tests/               # Pruebas del validador
+└── tests/               # Pruebas del validador y de las skills
 ```
 
 Se generan al usar la app y no se versionan: `memoria.db`, `conversaciones.txt`, `output/` y `descargas_campus/`. El índice `rag/bibliografia.db` sí se versiona (pesa unos 400 KB), para que el deploy funcione sin correr la ingesta.
@@ -171,10 +177,11 @@ Se generan al usar la app y no se versionan: `memoria.db`, `conversaciones.txt`,
 | **`buscar_bibliografia` (RAG, tool propia)** | Es la fuente principal: las definiciones salen del libro de la cátedra. SQLite evita depender de un motor vectorial externo. Un embedding cubre 2 páginas para que cada fragmento tenga una definición o demostración completa con su contexto, y se puede citar como "libro, págs. X-Y". Cada fragmento se recorta a 2.200 caracteres y se devuelven 3 por consulta, para cuidar el contexto. |
 | **`explorar_campus` (MCP, externa)** | Cruza la teoría con el recorte de temas y los ejercicios de los docentes. Usa el servidor MCP del campus por stdio y extrae el texto de las filminas y guías que descarga. Las 3 acciones de navegación van en una sola tool para que el modelo tenga menos herramientas entre las que elegir. |
 | **`buscar_en_internet` (externa)** | Completa con conceptos actuales o ejemplos solo cuando hace falta. Usa DuckDuckGo (`ddgs`), que es gratis y no pide API key. |
-| **`generar_banco_estudia` (tool propia)** | Arma el prompt oficial de estud.ia con el material recopilado, llama al LLM y **valida** el JSON (tipos, índices, huecos `___`, cantidad, explicaciones, repetidas). Si hay errores, reintenta hasta 3 veces pasándole los errores al modelo. Guarda el archivo en `output/`. |
-| **Memoria (`SqliteSaver`)** | Permite iterar sobre el banco ("agregá 5 más", "solo verdadero/falso"). El material de los turnos anteriores queda en el estado y la generadora lo reutiliza. |
-| **Middleware `cerrar_con_json` (propio)** | Cuando la generadora devuelve un banco válido, termina el turno con ese JSON tal cual. Así se garantiza que la salida final sea *exclusivamente* el JSON validado, sin que el modelo lo reescriba, y se ahorra una llamada al LLM. No se usa ningún middleware prearmado de LangChain. |
-| **Middleware `exigir_cierre` (propio)** | Si el modelo termina el turno sin llamar a la generadora después de haber consultado la bibliografía, le recuerda **una vez** el paso 4 y vuelve a llamarlo. Lo motivó un caso real: un modelo gratuito entró en un bucle de razonamiento y cerró el turno sin JSON. Un solo recordatorio por turno evita los bucles. La UI muestra cuándo actúa. |
+| **Skill `generar-banco-estudia` (propia)** | `skills/generar-banco-estudia/SKILL.md` tiene el formato oficial de estud.ia y las reglas para escribir el banco. El agente la carga con `cargar_skill` solo al cerrar el pedido (divulgación progresiva) y escribe el JSON él mismo, sin una segunda llamada a otro LLM. Agregar otra skill es sumar una carpeta con su `SKILL.md`. |
+| **`guardar_banco_estudia` (tool propia)** | **Valida** el JSON que escribió el agente siguiendo la skill (tipos, índices, huecos `___`, cantidad, explicaciones, repetidas). Si hay errores, se los devuelve para que los corrija, hasta 3 intentos por pedido. Guarda el archivo en `output/`. |
+| **Memoria (`SqliteSaver`)** | Permite iterar sobre el banco ("agregá 5 más", "solo verdadero/falso"). El material de los turnos anteriores queda en la conversación y en el estado, y la skill lo reutiliza. |
+| **Middleware `cerrar_con_json` (propio)** | Cuando `guardar_banco_estudia` valida el banco, termina el turno con ese JSON tal cual. Así se garantiza que la salida final sea *exclusivamente* el JSON validado, sin que el modelo lo reescriba, y se ahorra una llamada al LLM. No se usa ningún middleware prearmado de LangChain. |
+| **Middleware `exigir_cierre` (propio)** | Si el modelo termina el turno sin entregar el banco después de haber consultado la bibliografía, le recuerda **una vez** el paso 4 (cargar la skill y guardar el banco) y vuelve a llamarlo. Lo motivó un caso real: un modelo gratuito entró en un bucle de razonamiento y cerró el turno sin JSON. Un solo recordatorio por turno evita los bucles. La UI muestra cuándo actúa. |
 | **Temperatura 0.6 y tope de salida** | Los modelos de razonamiento se repiten en bucle con temperatura 0. Con 0.6 (lo que recomiendan los proveedores) y `max_tokens=8000`, un bucle se corta a tiempo. Se configuran con `LLM_TEMPERATURE` y `LLM_MAX_TOKENS`. |
 | **Reintentos ante 429** | Los resuelve el propio cliente de LangChain (`max_retries=6`, con espera exponencial), así que no hace falta middleware. |
 | **UI Streamlit** | Muestra en vivo cada tool con sus argumentos y un resumen del resultado, renderiza markdown y presenta el JSON final con un botón de descarga. |
