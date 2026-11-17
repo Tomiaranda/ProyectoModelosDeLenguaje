@@ -193,15 +193,23 @@ def _quitar_material_cb(materia: str, libro: str) -> None:
         _mensaje_admin("ok", f"Quitado «{libro}» de {materia}.")
 
 
-def _indexar_materiales_cb(materia: str, clave: str) -> None:
-    archivos = st.session_state.get(clave) or []
-    try:
-        agregados = agregar_materiales(materia, archivos)
-    except Exception as e:
-        _mensaje_admin("error", f"No se pudo indexar: {e}")
-    else:
-        st.session_state["admin_bibliografia_pendiente"] = True
-        _mensaje_admin("ok", f"Indexados: {', '.join(agregados)}.")
+def _indexar_materiales(materia: str, archivos) -> None:
+    """Indexa en el cuerpo del diálogo (no en un callback) para poder mostrar el progreso."""
+    with st.status(f"Indexando {len(archivos)} material(es)…", expanded=True) as estado:
+        barra = st.progress(0.0, text="Preparando…")
+        try:
+            agregados = agregar_materiales(
+                materia, archivos, lambda fraccion, texto: barra.progress(min(fraccion, 1.0), text=texto)
+            )
+        except Exception as e:
+            estado.update(label="No se pudo indexar", state="error")
+            _mensaje_admin("error", f"No se pudo indexar: {e}")
+        else:
+            estado.update(label="Materiales indexados", state="complete")
+            st.session_state["admin_bibliografia_pendiente"] = True
+            st.session_state["adm_subidas"] = st.session_state.get("adm_subidas", 0) + 1  # vacía el uploader
+            _mensaje_admin("ok", f"Indexados: {', '.join(agregados)}.")
+    st.rerun(scope="fragment")
 
 
 def _eliminar_materia_cb(materia: str) -> None:
@@ -273,14 +281,12 @@ def administrar_bibliografia() -> None:
 
             nuevos = st.file_uploader(
                 f"Agregar PDFs a {materia}", type=["pdf"], accept_multiple_files=True,
-                key=f"adm-subir-{materia}",
+                key=f"adm-subir-{materia}-{st.session_state.get('adm_subidas', 0)}",
             )
-            if nuevos:
-                st.button(
-                    "Indexar materiales", key=f"adm-indexar-{materia}", type="primary",
-                    on_click=_indexar_materiales_cb,
-                    args=(materia, f"adm-subir-{materia}"),
-                )
+            if nuevos and st.button(
+                "Indexar materiales", key=f"adm-indexar-{materia}", type="primary",
+            ):
+                _indexar_materiales(materia, nuevos)
 
             if st.checkbox(
                 "Borrar esta materia y todo su material", key=f"adm-conf-{materia}"
@@ -292,11 +298,13 @@ def administrar_bibliografia() -> None:
                 )
 
     st.markdown('<div class="adm-titulo">Nueva materia</div>', unsafe_allow_html=True)
-    nombre = st.text_input(
+    st.text_input(
         "Nombre de la materia", key="adm-nombre", placeholder="p. ej. Bases de Datos"
     )
     st.button(
-        "Crear materia", key="adm-crear", type="primary", disabled=not nombre.strip(),
+        # Sin disabled: st.text_input no avisa el valor hasta Enter o perder el foco, así que el
+        # botón quedaba bloqueado mientras se escribía. El callback ya rechaza el nombre vacío.
+        "Crear materia", key="adm-crear", type="primary",
         on_click=_crear_materia_cb, args=("adm-nombre",),
     )
 
