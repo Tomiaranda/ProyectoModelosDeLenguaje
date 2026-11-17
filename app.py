@@ -84,29 +84,32 @@ a.tr-line:hover { color: #09090b; }
 [data-testid="stStatusWidget"] { display: none; }
 /* Sidebar estilo shadcn: header, grupos con label, menú de botones y footer */
 [data-testid="stSidebar"] { border-right: 1px solid #e4e4e7; }
-[data-testid="stSidebarUserContent"] { padding-top: .5rem; }
-.sb-head { display: flex; align-items: center; gap: .6rem; padding: .25rem .25rem .75rem; }
-.sb-logo { width: 2rem; height: 2rem; border-radius: .5rem; background: #18181b; color: #fafafa;
+[data-testid="stSidebarUserContent"] { padding: .75rem 1rem 1.5rem; }
+.sb-head { display: flex; align-items: center; gap: .75rem; padding: .25rem .25rem 1rem; margin-bottom: .5rem;
+  border-bottom: 1px solid #e4e4e7; }
+.sb-logo { width: 2.25rem; height: 2.25rem; border-radius: .6rem; background: #18181b; color: #fafafa;
   display: grid; place-items: center; flex: none; }
 .sb-logo svg { width: 1.1rem; height: 1.1rem; }
 .sb-head b { display: block; font-size: .9rem; font-weight: 600; color: #09090b; line-height: 1.2; }
 .sb-head small { font-size: .75rem; color: #71717a; }
-.sb-label { font-size: .75rem; font-weight: 500; color: #71717a; padding: .75rem .5rem .25rem; }
-.sb-item { display: flex; align-items: center; gap: .5rem; padding: .35rem .5rem; border-radius: .5rem;
+.sb-label { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #a1a1aa;
+  padding: 1.25rem .5rem .5rem; }
+.sb-item { display: flex; align-items: center; gap: .6rem; padding: .5rem .6rem; border-radius: .5rem; margin: .15rem 0;
   font-size: .875rem; color: #27272a; text-decoration: none; }
 a.sb-item:hover { background: #f4f4f5; color: #09090b; }
 .sb-item svg { width: 1rem; height: 1rem; flex: none; color: #71717a; }
 .sb-badge { margin-left: auto; font-size: .7rem; font-weight: 500; color: #71717a; background: #f4f4f5;
   border-radius: 9999px; padding: 0 .45rem; line-height: 1.25rem; }
-.sb-sub { margin: 0 0 .25rem 1rem; padding-left: .6rem; border-left: 1px solid #e4e4e7; }
-.sb-sub div { font-size: .8rem; color: #71717a; padding: .2rem .5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-[data-testid="stSidebar"] button[kind="tertiary"] { width: 100%; justify-content: flex-start; padding: .35rem .5rem;
+.sb-sub { margin: .1rem 0 .6rem 1.1rem; padding-left: .75rem; border-left: 1px solid #e4e4e7; }
+.sb-sub div { font-size: .8rem; color: #71717a; padding: .3rem .5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-testid="stSidebar"] button[kind="tertiary"] { width: 100%; justify-content: flex-start; padding: .5rem .6rem; gap: .35rem;
   border-radius: .5rem; color: #27272a; min-height: 0; }
 [data-testid="stSidebar"] button[kind="tertiary"] p { font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 [data-testid="stSidebar"] button[kind="tertiary"]:hover { background: #f4f4f5; color: #09090b; }
+[data-testid="stSidebar"] button[kind="tertiary"]:focus-visible { outline: 2px solid #a1a1aa; outline-offset: 1px; }
 [data-testid="stSidebar"] button[kind="tertiary"]:disabled { background: #f4f4f5; color: #09090b; font-weight: 500; opacity: 1; }
-[data-testid="stSidebar"] [data-testid="stElementContainer"] { margin-bottom: -0.6rem; }
-[data-testid="stSidebar"] [data-testid="stExpander"] { margin-top: .75rem; }
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: .35rem; }
+[data-testid="stSidebar"] [data-testid="stExpander"] { margin-top: 1rem; }
 .trace { border: 1px solid #e4e4e7; border-radius: .75rem; padding: .75rem 1rem; margin: .25rem 0 .75rem; }
 .trace-head { display: flex; justify-content: space-between; font-size: .8rem; color: #71717a; margin-bottom: .5rem; }
 .trace-head b { color: #09090b; font-weight: 600; }
@@ -124,7 +127,7 @@ a.sb-item:hover { background: #f4f4f5; color: #09090b; }
 .trace li.en_curso::before { border-color: #18181b; border-top-color: transparent; animation: girar .8s linear infinite; }
 @keyframes girar { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .trace li.en_curso::before { animation: none; border-top-color: #18181b; } }
-.sb-label-inline { padding: .35rem .5rem; }
+.sb-label-inline { padding: 1.25rem .5rem .5rem; }
 .adm-encabezado { font-size: .8rem; color: #71717a; margin: -.25rem 0 .75rem; }
 .adm-titulo { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; color: #a1a1aa; margin: .85rem 0 .35rem; }
 .adm-fila { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem; border: 1px solid #e4e4e7;
@@ -312,6 +315,7 @@ def administrar_bibliografia() -> None:
 
 # Modelos de reasoning con tool calling (todos devuelven su razonamiento): id -> (nombre, proveedor).
 MODELOS = {
+    "nvidia/nemotron-3.5-super-vl:free": ("OpenRouter · Nemotron 3.5 Super", "openrouter"),
     "openai/gpt-oss-120b": ("Groq · GPT-OSS 120B", "groq"),
     "openai/gpt-oss-20b": ("Groq · GPT-OSS 20B", "groq"),
     "qwen/qwen3.8-27b": ("Groq · Qwen 3.8 27B", "groq"),
@@ -320,7 +324,6 @@ MODELOS = {
     "google/gemma-4-31b-it:free": ("OpenRouter · Gemma 4 31B", "openrouter"),
     "google/gemma-4-26b-a4b-it:free": ("OpenRouter · Gemma 4 26B", "openrouter"),
     "baidu/ernie-5.5-flash-preview:free": ("OpenRouter · ERNIE 5.5 Flash", "openrouter"),
-    "nvidia/nemotron-3.5-super-vl:free": ("OpenRouter · Nemotron 3.5 Super", "openrouter"),
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": ("OpenRouter · Nemotron 3 Nano Omni", "openrouter"),
     "thinkingmachines/inkling-2-small:free": ("OpenRouter · Inkling 2 Small", "openrouter"),
     "gemma-4-31b-it": ("AI Studio · Gemma 4 31B", "google_genai"),
@@ -330,7 +333,7 @@ MODELOS = {
 
 def render_modelo() -> None:
     """Selector de modelo (el Model Selector del Prompt Input de shadcn)."""
-    actual = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
+    actual = os.getenv("MODEL_NAME", "nvidia/nemotron-3.5-super-vl:free")
     opciones = list(MODELOS) if actual in MODELOS else [actual, *MODELOS]
     elegido = SB_PIE.selectbox("Modelo", opciones, index=opciones.index(actual),
                                format_func=lambda m: MODELOS.get(m, (m,))[0],
@@ -341,21 +344,6 @@ def render_modelo() -> None:
         for clave, valor in (("MODEL_NAME", elegido), ("MODEL_PROVIDER", MODELOS[elegido][1])):
             os.environ[clave] = valor
             set_key(ENV_FILE, clave, valor)   # local: se recuerda al reiniciar
-        recargar_agente()
-
-
-def render_esfuerzo() -> None:
-    """Esfuerzo de razonamiento: cuánto piensa el modelo antes de cada respuesta."""
-    actual = os.getenv("LLM_EFFORT") if os.getenv("LLM_EFFORT") in ("bajo", "medio", "alto") else "bajo"
-    elegido = SB_PIE.segmented_control(
-        "Razonamiento", ["bajo", "medio", "alto"], default=actual, format_func=str.capitalize,
-        help="Bajo: rápido, alcanza para la mayoría. Medio: varios temas o archivos largos. "
-             "Alto: pedidos grandes; más lento y gasta más cuota.")
-    if elegido and elegido != actual:
-        from dotenv import set_key
-
-        os.environ["LLM_EFFORT"] = elegido
-        set_key(ENV_FILE, "LLM_EFFORT", elegido)
         recargar_agente()
 
 
@@ -370,7 +358,6 @@ SB_CABECERA.markdown(
     '<path d="M22 10v6M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></svg></div>'
     '<div><b>Generador estud.ia</b><small>UTN FRM</small></div></div>', unsafe_allow_html=True)
 render_modelo()
-render_esfuerzo()
 render_claves()
 
 try:
@@ -638,7 +625,7 @@ def render_sidebar() -> None:
             st.markdown('<div class="sb-label sb-label-inline">Bibliografía</div>', unsafe_allow_html=True)
         with administrar:
             if st.button("Administrar", key="admin-bibliografia", icon=":material/settings:",
-                         type="tertiary", use_container_width=True):
+                         type="tertiary", width="stretch"):
                 administrar_bibliografia()
         materias = materias_con_bibliografia()
         if not materias:

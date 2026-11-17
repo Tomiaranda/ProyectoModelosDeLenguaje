@@ -223,12 +223,12 @@ ADAPTADORES: dict[str, type[AdaptadorLLM]] = {
     AdaptadorLMStudio.proveedor: AdaptadorLMStudio,
 }
 
-MODELO_POR_DEFECTO = "openai/gpt-oss-120b"
+MODELO_POR_DEFECTO = "nvidia/nemotron-3.5-super-vl:free"
 
 
 def obtener_adaptador() -> AdaptadorLLM:
     """Fábrica: elige el adaptador según el .env."""
-    proveedor = os.getenv("MODEL_PROVIDER", "groq")
+    proveedor = os.getenv("MODEL_PROVIDER", "openrouter")
     modelo = os.getenv("MODEL_NAME", MODELO_POR_DEFECTO)
     if proveedor not in ADAPTADORES:
         raise RuntimeError(

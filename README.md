@@ -80,8 +80,8 @@ Completá `GROQ_API_KEY`, `GOOGLE_API_KEY`, `CAMPUS_USER` y `CAMPUS_PASS`. Para 
 
 | Proveedor | Configuración |
 |---|---|
-| Groq (por defecto) | `MODEL_PROVIDER=groq`, `MODEL_NAME=openai/gpt-oss-120b` |
-| OpenRouter | `MODEL_PROVIDER=openrouter`, `MODEL_NAME=google/gemma-4-31b-it:free` (respaldo opcional en `MODEL_FALLBACKS`) |
+| OpenRouter (por defecto) | `MODEL_PROVIDER=openrouter`, `MODEL_NAME=nvidia/nemotron-3.5-super-vl:free` (respaldo opcional en `MODEL_FALLBACKS`) |
+| Groq | `MODEL_PROVIDER=groq`, `MODEL_NAME=openai/gpt-oss-120b` |
 | Google AI Studio | `MODEL_PROVIDER=google_genai`, `MODEL_NAME=gemma-4-26b-a4b-it` (o un Gemini, p. ej. `gemini-2.5-flash`) |
 | LM Studio | `MODEL_PROVIDER=lmstudio`, `MODEL_NAME=<id del modelo cargado>` |
 
@@ -182,7 +182,7 @@ Se generan al usar la app y no se versionan: `memoria.db`, `conversaciones.txt`,
 | **Memoria (`SqliteSaver`)** | Permite iterar sobre el banco ("agregá 5 más", "solo verdadero/falso"). El material de los turnos anteriores queda en la conversación y en el estado, y la skill lo reutiliza. |
 | **Middleware `cerrar_con_json` (propio)** | Cuando `guardar_banco_estudia` valida el banco, termina el turno con ese JSON tal cual. Así se garantiza que la salida final sea *exclusivamente* el JSON validado, sin que el modelo lo reescriba, y se ahorra una llamada al LLM. No se usa ningún middleware prearmado de LangChain. |
 | **Middleware `exigir_cierre` (propio)** | Si el modelo termina el turno sin entregar el banco después de haber consultado la bibliografía, le recuerda **una vez** el paso 4 (cargar la skill y guardar el banco) y vuelve a llamarlo. Lo motivó un caso real: un modelo gratuito entró en un bucle de razonamiento y cerró el turno sin JSON. Un solo recordatorio por turno evita los bucles. La UI muestra cuándo actúa. |
-| **Temperatura 0.6 y tope de salida** | Los modelos de razonamiento se repiten en bucle con temperatura 0. Con 0.6 (lo que recomiendan los proveedores) y un tope de salida, un bucle se corta a tiempo. La temperatura se configura con `LLM_TEMPERATURE`; el tope sale del esfuerzo de razonamiento (`LLM_EFFORT`: bajo/medio/alto = 8k/12k/16k tokens de salida; en Groq va como `reasoning_effort` low/medium/high y en OpenRouter y Gemini como presupuesto de 100/200/500 tokens para pensar), que también se elige en la barra lateral. |
+| **Temperatura 0.6 y tope de salida** | Los modelos de razonamiento se repiten en bucle con temperatura 0. Con 0.6 (lo que recomiendan los proveedores) y un tope de salida, un bucle se corta a tiempo. La temperatura se configura con `LLM_TEMPERATURE`; el tope sale del esfuerzo de razonamiento (`LLM_EFFORT`: bajo/medio/alto = 8k/12k/16k tokens de salida; en Groq va como `reasoning_effort` low/medium/high y en OpenRouter y Gemini como presupuesto de 100/200/500 tokens para pensar). Se configura en el `.env` (por defecto, bajo). |
 | **Reintentos ante 429** | Los resuelve el propio cliente de LangChain (`max_retries=6`, con espera exponencial), así que no hace falta middleware. |
 | **UI Streamlit** | Muestra en vivo cada tool con sus argumentos y un resumen del resultado, renderiza markdown y presenta el JSON final con un botón de descarga. |
 
