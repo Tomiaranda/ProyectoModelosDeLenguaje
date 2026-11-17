@@ -97,9 +97,7 @@ class Paso(BaseModel):
 
 @tool
 def plan(pasos: list[Paso]) -> str:
-    """Planificá como una lista TO DO los pedidos LARGOS: los que requieren varias fuentes
-    (bibliografía + campus + leer archivos + internet) o varios temas. NO la uses para
-    pedidos simples (cambios sobre un banco ya generado, pedir datos que faltan).
+    """Planificá SIEMPRE el pedido como una lista TO DO, aunque sea simple.
 
     Llamala al empezar con todos los pasos y el primero "en_curso". Después, cada vez que
     termines un paso, volvé a llamarla con la lista completa actualizada EN LA MISMA

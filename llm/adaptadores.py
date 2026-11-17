@@ -25,7 +25,19 @@ TIMEOUT = int(os.getenv("LLM_TIMEOUT", "180"))
 # Los modelos de razonamiento entran en bucles repetitivos con temperatura 0;
 # los proveedores recomiendan ~0.6. El tope de salida corta un bucle a tiempo.
 TEMPERATURA_AGENTE = float(os.getenv("LLM_TEMPERATURE", "0.6"))
-MAX_TOKENS_SALIDA = int(os.getenv("LLM_MAX_TOKENS", "8000"))
+
+# Esfuerzo de razonamiento: (tokens para pensar en OpenRouter y Gemini, tope de salida total). El tope incluye
+# el razonamiento, así que deja ~7-8k libres para la respuesta (un banco en JSON entra).
+# bajo: elegir tools y armar bancos simples. medio: varios temas o leer archivos largos.
+# alto: pedidos grandes que cruzan bibliografía, campus e internet.
+ESFUERZOS = {"bajo": (100, 8000), "medio": (200, 12000), "alto": (500, 16000)}
+
+
+NIVELES_GROQ = {"bajo": "low", "medio": "medium", "alto": "high"}
+
+
+def esfuerzo() -> tuple[int, int]:
+    return ESFUERZOS.get(os.getenv("LLM_EFFORT", "bajo"), ESFUERZOS["bajo"])
 
 
 def _requerir(variable: str) -> str:
@@ -65,7 +77,7 @@ class AdaptadorLLM(ABC):
 def _chat_openai_con_razonamiento():
     """ChatOpenAI que conserva el razonamiento del modelo.
 
-    OpenRouter (y LM Studio) devuelven el razonamiento en `message.reasoning` /
+    Groq (y LM Studio) devuelven el razonamiento en `message.reasoning` /
     `message.reasoning_content`, campos que no son de la API de OpenAI y que
     ChatOpenAI descarta. Esta subclase los copia a `additional_kwargs`, de donde
     los lee agente.py para mostrarlos en la UI.
@@ -88,9 +100,8 @@ def _chat_openai_con_razonamiento():
         def _get_request_payload(self, input_, *, stop=None, **kwargs):
             """Reenvía el razonamiento de cada respuesta anterior (`reasoning_details`).
 
-            Sin esto, los modelos razonan solo en la primera llamada del turno y
-            después eligen las tools "a ciegas": OpenRouter pide devolverlo tal cual
-            en los mensajes del asistente para que sigan pensando entre tools.
+            Sin esto, algunos modelos razonan solo en la primera llamada del turno y
+            después eligen las tools "a ciegas". Si el proveedor no lo manda, no hace nada.
             """
             payload = super()._get_request_payload(input_, stop=stop, **kwargs)
             mensajes = self._convert_input(input_).to_messages()
@@ -112,7 +123,9 @@ class AdaptadorOpenRouter(AdaptadorLLM):
     def __init__(self, modelo: str):
         super().__init__(modelo)
         self._api_key = _requerir("OPENROUTER_API_KEY")
-        respaldo = os.getenv("MODEL_FALLBACKS", "google/gemma-4-26b-a4b-it:free,baidu/ernie-5.5-flash-preview:free")
+        # Respaldo opcional (MODEL_FALLBACKS, separados por coma): si el modelo da 429,
+        # OpenRouter prueba los siguientes en el mismo request. Vacío = solo el elegido.
+        respaldo = os.getenv("MODEL_FALLBACKS", "")
         self._respaldo = [m.strip() for m in respaldo.split(",") if m.strip() and m.strip() != modelo]
 
     def modelo_chat(self, temperatura: float = TEMPERATURA_AGENTE) -> BaseChatModel:
@@ -123,17 +136,44 @@ class AdaptadorOpenRouter(AdaptadorLLM):
             temperature=temperatura,
             max_retries=REINTENTOS,
             timeout=TIMEOUT,
-            max_tokens=MAX_TOKENS_SALIDA,
+            max_tokens=esfuerzo()[1],
             extra_body={
-                # Pide el razonamiento (modelos que lo soportan) con esfuerzo bajo:
-                # alcanza para decidir qué tool llamar y gasta menos tiempo y tokens.
-                "reasoning": {"enabled": True, "effort": "low"},
-                # Fallback del lado de OpenRouter: si el modelo principal da 429 o no
-                # está disponible, prueba los siguientes en el mismo request.
+                # Presupuesto de razonamiento según LLM_EFFORT. A los modelos que solo
+                # aceptan effort, OpenRouter se lo traduce desde estos tokens.
+                "reasoning": {"enabled": True, "max_tokens": esfuerzo()[0]},
                 "models": [self.modelo, *self._respaldo],
             },
             # Encabezado opcional que OpenRouter usa para identificar la app.
             default_headers={"X-Title": "Generador de practica estud.ia - UTN FRM"},
+        )
+
+
+class AdaptadorGroq(AdaptadorLLM):
+    """Groq expone una API compatible con OpenAI: se adapta con ChatOpenAI."""
+
+    proveedor = "groq"
+    URL = "https://api.groq.com/openai/v1"
+
+    def __init__(self, modelo: str):
+        super().__init__(modelo)
+        self._api_key = _requerir("GROQ_API_KEY")
+
+    def modelo_chat(self, temperatura: float = TEMPERATURA_AGENTE) -> BaseChatModel:
+        # A diferencia de OpenRouter, Groq no acepta un presupuesto en tokens: el nivel va como reasoning_effort.
+        razonamiento = {"reasoning_effort": NIVELES_GROQ.get(os.getenv("LLM_EFFORT", "bajo"), "low")}
+        if not self.modelo.startswith("openai/gpt-oss"):
+            # Los GPT-OSS devuelven `reasoning` solos; el resto lo necesita en "parsed"
+            # (con tools, "raw" da 400 y "hidden" no lo devuelve).
+            razonamiento["reasoning_format"] = "parsed"
+        return _chat_openai_con_razonamiento()(
+            model=self.modelo,
+            base_url=self.URL,
+            api_key=self._api_key,
+            temperature=temperatura,
+            max_retries=REINTENTOS,
+            timeout=TIMEOUT,
+            max_tokens=esfuerzo()[1],
+            extra_body=razonamiento,
         )
 
 
@@ -154,6 +194,9 @@ class AdaptadorGemini(AdaptadorLLM):
             temperature=temperatura,
             max_retries=REINTENTOS,
             include_thoughts=True,
+            # Gemma razona siempre y rechaza el presupuesto: ahí el nivel solo cambia el tope.
+            thinking_budget=None if self.modelo.startswith("gemma") else esfuerzo()[0],
+            max_output_tokens=esfuerzo()[1],
         )
 
 
@@ -168,22 +211,24 @@ class AdaptadorLMStudio(AdaptadorLLM):
             base_url=os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
             api_key="lm-studio",   # el cliente la exige, LM Studio la ignora
             temperature=temperatura,
+            max_tokens=esfuerzo()[1],   # ponytail: sin presupuesto de razonamiento, el modelo local no lo expone igual
             timeout=TIMEOUT,
         )
 
 
 ADAPTADORES: dict[str, type[AdaptadorLLM]] = {
     AdaptadorOpenRouter.proveedor: AdaptadorOpenRouter,
+    AdaptadorGroq.proveedor: AdaptadorGroq,
     AdaptadorGemini.proveedor: AdaptadorGemini,
     AdaptadorLMStudio.proveedor: AdaptadorLMStudio,
 }
 
-MODELO_POR_DEFECTO = "google/gemma-4-31b-it:free"
+MODELO_POR_DEFECTO = "openai/gpt-oss-120b"
 
 
 def obtener_adaptador() -> AdaptadorLLM:
     """Fábrica: elige el adaptador según el .env."""
-    proveedor = os.getenv("MODEL_PROVIDER", "openrouter")
+    proveedor = os.getenv("MODEL_PROVIDER", "groq")
     modelo = os.getenv("MODEL_NAME", MODELO_POR_DEFECTO)
     if proveedor not in ADAPTADORES:
         raise RuntimeError(

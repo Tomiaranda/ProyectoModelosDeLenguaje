@@ -137,6 +137,7 @@ a.sb-item:hover { background: #f4f4f5; color: #09090b; }
 CLAVES = {
     "CAMPUS_USER": "Usuario del campus",
     "CAMPUS_PASS": "Contraseña del campus",
+    "GROQ_API_KEY": "Groq API key",
     "OPENROUTER_API_KEY": "OpenRouter API key",
     "GOOGLE_API_KEY": "Google API key",
 }
@@ -309,28 +310,52 @@ def administrar_bibliografia() -> None:
     )
 
 
-# Modelos gratis de OpenRouter con tool calling. Los que no se eligen quedan de respaldo ante un 429.
+# Modelos de reasoning con tool calling (todos devuelven su razonamiento): id -> (nombre, proveedor).
 MODELOS = {
-    "google/gemma-4-31b-it:free": "Gemma 4 31B",
-    "google/gemma-4-26b-a4b-it:free": "Gemma 4 26B",
-    "baidu/ernie-5.5-flash-preview:free": "ERNIE 5.5 Flash",
-    "nvidia/nemotron-3.5-super-vl:free": "Nemotron 3.5 Super",
-    "thinkingmachines/inkling-2-small:free": "Inkling 2 Small",
+    "openai/gpt-oss-120b": ("Groq · GPT-OSS 120B", "groq"),
+    "openai/gpt-oss-20b": ("Groq · GPT-OSS 20B", "groq"),
+    "qwen/qwen3.8-27b": ("Groq · Qwen 3.8 27B", "groq"),
+    "minimaxai/minimax-m2.7": ("Groq · MiniMax M2.7", "groq"),
+    "meta-models/muse-spark-open": ("Groq · Muse Spark Open", "groq"),
+    "google/gemma-4-31b-it:free": ("OpenRouter · Gemma 4 31B", "openrouter"),
+    "google/gemma-4-26b-a4b-it:free": ("OpenRouter · Gemma 4 26B", "openrouter"),
+    "baidu/ernie-5.5-flash-preview:free": ("OpenRouter · ERNIE 5.5 Flash", "openrouter"),
+    "nvidia/nemotron-3.5-super-vl:free": ("OpenRouter · Nemotron 3.5 Super", "openrouter"),
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": ("OpenRouter · Nemotron 3 Nano Omni", "openrouter"),
+    "thinkingmachines/inkling-2-small:free": ("OpenRouter · Inkling 2 Small", "openrouter"),
+    "gemma-4-31b-it": ("AI Studio · Gemma 4 31B", "google_genai"),
+    "gemma-4-26b-a4b-it": ("AI Studio · Gemma 4 26B", "google_genai"),
 }
 
 
 def render_modelo() -> None:
-    """Selector de modelo (el Model Selector del Prompt Input de shadcn, sin el effort)."""
-    actual = os.getenv("MODEL_NAME", "google/gemma-4-31b-it:free")
+    """Selector de modelo (el Model Selector del Prompt Input de shadcn)."""
+    actual = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
     opciones = list(MODELOS) if actual in MODELOS else [actual, *MODELOS]
     elegido = SB_PIE.selectbox("Modelo", opciones, index=opciones.index(actual),
-                               format_func=lambda m: MODELOS.get(m, m),
-                               help="Gratis en OpenRouter. Si da 429, se prueban los respaldos.")
+                               format_func=lambda m: MODELOS.get(m, (m,))[0],
+                               help="Modelos de reasoning en Groq, OpenRouter (:free) y Google AI Studio. Todos gratis con límite de uso.")
     if elegido != actual:
         from dotenv import set_key
 
-        os.environ["MODEL_NAME"] = elegido
-        set_key(ENV_FILE, "MODEL_NAME", elegido)   # local: se recuerda al reiniciar
+        for clave, valor in (("MODEL_NAME", elegido), ("MODEL_PROVIDER", MODELOS[elegido][1])):
+            os.environ[clave] = valor
+            set_key(ENV_FILE, clave, valor)   # local: se recuerda al reiniciar
+        recargar_agente()
+
+
+def render_esfuerzo() -> None:
+    """Esfuerzo de razonamiento: cuánto piensa el modelo antes de cada respuesta."""
+    actual = os.getenv("LLM_EFFORT") if os.getenv("LLM_EFFORT") in ("bajo", "medio", "alto") else "bajo"
+    elegido = SB_PIE.segmented_control(
+        "Razonamiento", ["bajo", "medio", "alto"], default=actual, format_func=str.capitalize,
+        help="Bajo: rápido, alcanza para la mayoría. Medio: varios temas o archivos largos. "
+             "Alto: pedidos grandes; más lento y gasta más cuota.")
+    if elegido and elegido != actual:
+        from dotenv import set_key
+
+        os.environ["LLM_EFFORT"] = elegido
+        set_key(ENV_FILE, "LLM_EFFORT", elegido)
         recargar_agente()
 
 
@@ -345,11 +370,12 @@ SB_CABECERA.markdown(
     '<path d="M22 10v6M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></svg></div>'
     '<div><b>Generador estud.ia</b><small>UTN FRM</small></div></div>', unsafe_allow_html=True)
 render_modelo()
+render_esfuerzo()
 render_claves()
 
 try:
     from agente import (
-        list_threads, new_thread, resume_thread, saved_turns, select_thread, stream_turn,
+        cancelar_turno, list_threads, new_thread, resume_thread, saved_turns, select_thread, stream_turn,
     )
     from tools import materias_con_bibliografia
 except RuntimeError as e:   # p. ej. faltan claves en el .env
@@ -630,6 +656,11 @@ def render_sidebar() -> None:
 
 if "config" not in st.session_state:
     init_session(resume_thread())
+if st.session_state.pop("detenido", False):
+    # ponytail: Streamlit corta el script en la próxima llamada a st.*, o sea al terminar
+    # el paso en curso (una llamada al modelo o a una tool), no a mitad del request.
+    cancelar_turno(st.session_state.config)
+    init_session(st.session_state.config)   # el turno parcial queda en el historial
 
 st.title("🎓 Generador de práctica para estud.ia")
 st.caption("Pedí preguntas sobre una materia y sus temas. El agente consulta los libros de la "
@@ -677,6 +708,8 @@ if entrada := st.chat_input("Pedí preguntas sobre una materia y sus temas…", 
     with st.chat_message("assistant"):
         try:
             adjuntos = leer_adjuntos(entrada.files, turno)
+            st.button("Detener", icon=":material/stop_circle:", type="tertiary",
+                      on_click=lambda: st.session_state.update(detenido=True))
             with st.spinner("El agente está trabajando..."):
                 eventos = render_eventos(stream_turn(prompt, st.session_state.config, turno, adjuntos))
         except Exception as e: 

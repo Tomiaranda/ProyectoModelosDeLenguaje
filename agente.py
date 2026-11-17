@@ -15,8 +15,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import after_model, before_model
-from langchain.messages import AIMessage, HumanMessage
+from langchain.agents.middleware import after_model, before_model, wrap_model_call
+from langchain.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 
@@ -30,7 +30,7 @@ SYSTEM_PROMPT = f"""Sos el generador de práctica de la UTN FRM. Tu ÚNICA funci
 
 El alumno te dice la MATERIA y los TEMAS (y opcionalmente la cantidad y los tipos de pregunta). Seguí SIEMPRE este orden estricto:
 
-0. Si el pedido es LARGO (varios temas, o hay que pasar por bibliografía, campus, leer archivos e internet), empezá llamando a `plan` con los pasos como lista TO DO y mantenela actualizada a medida que avanzás. Si es simple (un cambio sobre un banco ya generado, o falta un dato), no planifiques.
+0. SIEMPRE empezá llamando a `plan` con los pasos como lista TO DO, aunque el pedido sea simple, y mantenela actualizada a medida que avanzás.
 
 1. PRIMERO, bibliografía oficial: llamá a `buscar_bibliografia` con la materia y una consulta concreta por cada tema pedido. Es la fuente principal: las definiciones y conceptos tienen que salir de ahí.
 2. SEGUNDO, campus UTN FRM: usá `explorar_campus` para ver el enfoque de los docentes. Empezá con accion="materias", buscá la materia, pedí accion="contenido" y leé con accion="leer" los 1 o 2 archivos (filminas, apuntes, guías) más relacionados con los temas. Si el campus no está disponible, seguí.
@@ -67,6 +67,27 @@ def cerrar_con_json(state: EstadoEstudio, runtime) -> dict | None:
     return None
 
 
+def _turno_actual(mensajes: list) -> list:
+    """Mensajes desde el último pedido del alumno (sin contar los recordatorios)."""
+    turno = []
+    for m in reversed(mensajes):
+        if m.type == "human" and not _es_recordatorio(m):
+            break
+        turno.append(m)
+    return turno
+
+
+@wrap_model_call
+def planificar_primero(request, handler):
+    """Middleware propio: la primera llamada al modelo de cada turno solo puede usar `plan`.
+
+    El prompt ya lo pide, pero algunos modelos lo saltean; forzar tool_choice lo garantiza.
+    """
+    if not any(m.type == "ai" for m in _turno_actual(request.messages)):
+        request = request.override(tool_choice="plan")
+    return handler(request)
+
+
 RECORDATORIO = (
     "[recordatorio del sistema] Ya consultaste las fuentes de este pedido. Ahora cargá la skill "
     "generar-banco-estudia con cargar_skill (si no la cargaste), escribí el banco y entregalo "
@@ -90,11 +111,7 @@ def exigir_cierre(state: EstadoEstudio, runtime) -> dict | None:
     ultimo = mensajes[-1]
     if ultimo.type != "ai" or ultimo.tool_calls:
         return None
-    turno = []
-    for m in reversed(mensajes):
-        if m.type == "human" and not _es_recordatorio(m):
-            break
-        turno.append(m)
+    turno = _turno_actual(mensajes)
     if any(_es_recordatorio(m) for m in turno):
         return None   # ya se le recordó en este turno: no insistir (evita bucles)
     consulto = any(c["name"] == "buscar_bibliografia" for m in turno if m.type == "ai"
@@ -113,7 +130,7 @@ agent = create_agent(
     model=adaptador.modelo_chat(),
     tools=TOOLS,
     system_prompt=SYSTEM_PROMPT,
-    middleware=[cerrar_con_json, exigir_cierre],
+    middleware=[planificar_primero, cerrar_con_json, exigir_cierre],
     state_schema=EstadoEstudio,     # messages + material recopilado
     context_schema=Contexto,        # número de turno, de solo lectura
     checkpointer=SqliteSaver(sqlite3.connect(DIR / "memoria.db", check_same_thread=False)),
@@ -149,6 +166,20 @@ def resume_thread() -> RunnableConfig:
 
 def saved_state(config: RunnableConfig) -> dict:
     return agent.get_state(config).values
+
+
+def cancelar_turno(config: RunnableConfig) -> None:
+    """Cierra un turno detenido a mitad: responde las tools que quedaron sin resultado.
+
+    Sin esto el historial queda con tool calls colgadas y el proveedor rechaza el turno siguiente.
+    """
+    mensajes = saved_state(config).get("messages", [])
+    respondidas = {m.tool_call_id for m in mensajes if m.type == "tool"}
+    pendientes = [c["id"] for m in mensajes if m.type == "ai" for c in m.tool_calls if c["id"] not in respondidas]
+    if pendientes:
+        agent.update_state(config, {"messages": [
+            ToolMessage("Cancelado: el alumno detuvo el turno.", tool_call_id=i) for i in pendientes]},
+            as_node="tools")
 
 
 def list_threads(limit: int = 6) -> list[tuple[str, str]]:

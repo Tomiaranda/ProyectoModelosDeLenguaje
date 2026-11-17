@@ -41,7 +41,7 @@ La generación del banco es una **skill**: un `SKILL.md` con las instrucciones d
 ## Requisitos
 
 - Python 3.10 o superior y Git
-- `OPENROUTER_API_KEY` ([OpenRouter](https://openrouter.ai/keys)): el modelo del agente, gratis con los modelos `:free`
+- `GROQ_API_KEY` ([Groq](https://console.groq.com/keys)): el modelo del agente (tier gratuito)
 - `GOOGLE_API_KEY` ([AI Studio](https://aistudio.google.com/apikey)): embeddings del RAG (`gemini-embedding-001`, tier gratuito)
 - Usuario y contraseña del Campus Virtual UTN FRM (opcional: sin ellos, el agente sigue sin el campus)
 
@@ -76,12 +76,13 @@ git submodule update --init
 cp .env.example .env              # Windows: Copy-Item .env.example .env
 ```
 
-Completá `OPENROUTER_API_KEY`, `GOOGLE_API_KEY`, `CAMPUS_USER` y `CAMPUS_PASS`. Para cambiar de modelo o proveedor:
+Completá `GROQ_API_KEY`, `GOOGLE_API_KEY`, `CAMPUS_USER` y `CAMPUS_PASS`. Para cambiar de modelo o proveedor:
 
 | Proveedor | Configuración |
 |---|---|
-| OpenRouter (por defecto) | `MODEL_PROVIDER=openrouter`, `MODEL_NAME=google/gemma-4-31b-it:free` |
-| Gemini | `MODEL_PROVIDER=google_genai`, `MODEL_NAME=gemini-2.5-flash` |
+| Groq (por defecto) | `MODEL_PROVIDER=groq`, `MODEL_NAME=openai/gpt-oss-120b` |
+| OpenRouter | `MODEL_PROVIDER=openrouter`, `MODEL_NAME=google/gemma-4-31b-it:free` (respaldo opcional en `MODEL_FALLBACKS`) |
+| Google AI Studio | `MODEL_PROVIDER=google_genai`, `MODEL_NAME=gemma-4-26b-a4b-it` (o un Gemini, p. ej. `gemini-2.5-flash`) |
 | LM Studio | `MODEL_PROVIDER=lmstudio`, `MODEL_NAME=<id del modelo cargado>` |
 
 **5. Indexar la bibliografía** (el repo ya trae el índice `rag/bibliografia.db`; solo hace falta regenerarlo cuando agregás o cambiás libros)
@@ -120,10 +121,9 @@ python -m pytest tests
 2. En **Advanced settings**, elegí Python **3.12** y pegá los secretos en formato TOML. Streamlit los expone como variables de entorno, así que el código los lee igual que desde el `.env`:
 
    ```toml
-   MODEL_PROVIDER = "openrouter"
-   MODEL_NAME = "google/gemma-4-31b-it:free"
-   MODEL_FALLBACKS = "google/gemma-4-26b-a4b-it:free,baidu/ernie-5.5-flash-preview:free"
-   OPENROUTER_API_KEY = "..."
+   MODEL_PROVIDER = "groq"
+   MODEL_NAME = "openai/gpt-oss-120b"
+   GROQ_API_KEY = "..."
    GOOGLE_API_KEY = "..."
    # Opcional, ver la advertencia de abajo:
    # CAMPUS_USER = "..."
@@ -151,7 +151,7 @@ La memoria (`memoria.db`) y los JSON de `output/` se guardan en el disco del con
 ├── skills/
 │   ├── __init__.py      # Descubre las skills (skills/<nombre>/SKILL.md) y arma el catálogo
 │   └── generar-banco-estudia/SKILL.md   # Instrucciones y formato oficial de estud.ia
-├── llm/adaptadores.py   # Patrón Adapter: OpenRouter, Gemini, LM Studio + embeddings
+├── llm/adaptadores.py   # Patrón Adapter: Groq, OpenRouter, Gemini, LM Studio + embeddings
 ├── rag/
 │   ├── store.py         # Base vectorial en SQLite (similitud coseno con numpy)
 │   ├── ingest.py        # PDF -> fragmentos de 2 páginas -> embeddings -> SQLite
@@ -172,7 +172,7 @@ Se generan al usar la app y no se versionan: `memoria.db`, `conversaciones.txt`,
 | Componente | Por qué está |
 |---|---|
 | **`create_agent`** | Lo exige la consigna. La tarea tiene varios pasos (libro → campus → web → generar) y el modelo decide qué consultas hacer según los temas pedidos. |
-| **Modelo: Gemma 4 31B (OpenRouter, gratis)** | Tiene *tool calling* nativo, 256k de contexto, buen castellano y **expone su razonamiento**. Es gratis. La idea original era Llama 3.3 70B, pero OpenRouter dio de baja su versión `:free` y hoy no hay ningún Llama gratis con tool calling. Si Gemma 4 31B da 429, OpenRouter prueba en el mismo request los respaldos de `MODEL_FALLBACKS`: `google/gemma-4-26b-a4b-it:free` (otro Gemma, más chico) y `baidu/ernie-5.5-flash-preview:free` (otro proveedor, por si el de Gemma está saturado). Los dos son gratis y tienen *tool calling*. |
+| **Modelo: GPT-OSS 120B (Groq)** | Modelo de *reasoning* con *tool calling* nativo, buen castellano y **expone su razonamiento**. Groq lo sirve rápido y tiene tier gratuito. En la barra lateral se puede cambiar por los otros modelos de reasoning de Groq (GPT-OSS 20B, Qwen 3.8 27B, MiniMax M2.7, Muse Spark Open). Antes se usaba Gemma 4 31B por OpenRouter, pero sus modelos `:free` daban 429 muy seguido y el respaldo (ERNIE) muchas veces no razonaba. |
 | **Patrón Adapter (`llm/adaptadores.py`)** | `agente.py` y `tools.py` solo conocen `AdaptadorLLM` (`modelo_chat()` y `completar()`). Cambiar de proveedor es cambiar el `.env` o registrar un adaptador nuevo, sin tocar el agente ni las tools. Lo mismo vale para los embeddings. |
 | **`buscar_bibliografia` (RAG, tool propia)** | Es la fuente principal: las definiciones salen del libro de la cátedra. SQLite evita depender de un motor vectorial externo. Un embedding cubre 2 páginas para que cada fragmento tenga una definición o demostración completa con su contexto, y se puede citar como "libro, págs. X-Y". Cada fragmento se recorta a 2.200 caracteres y se devuelven 3 por consulta, para cuidar el contexto. |
 | **`explorar_campus` (MCP, externa)** | Cruza la teoría con el recorte de temas y los ejercicios de los docentes. Usa el servidor MCP del campus por stdio y extrae el texto de las filminas y guías que descarga. Las 3 acciones de navegación van en una sola tool para que el modelo tenga menos herramientas entre las que elegir. |
@@ -182,17 +182,17 @@ Se generan al usar la app y no se versionan: `memoria.db`, `conversaciones.txt`,
 | **Memoria (`SqliteSaver`)** | Permite iterar sobre el banco ("agregá 5 más", "solo verdadero/falso"). El material de los turnos anteriores queda en la conversación y en el estado, y la skill lo reutiliza. |
 | **Middleware `cerrar_con_json` (propio)** | Cuando `guardar_banco_estudia` valida el banco, termina el turno con ese JSON tal cual. Así se garantiza que la salida final sea *exclusivamente* el JSON validado, sin que el modelo lo reescriba, y se ahorra una llamada al LLM. No se usa ningún middleware prearmado de LangChain. |
 | **Middleware `exigir_cierre` (propio)** | Si el modelo termina el turno sin entregar el banco después de haber consultado la bibliografía, le recuerda **una vez** el paso 4 (cargar la skill y guardar el banco) y vuelve a llamarlo. Lo motivó un caso real: un modelo gratuito entró en un bucle de razonamiento y cerró el turno sin JSON. Un solo recordatorio por turno evita los bucles. La UI muestra cuándo actúa. |
-| **Temperatura 0.6 y tope de salida** | Los modelos de razonamiento se repiten en bucle con temperatura 0. Con 0.6 (lo que recomiendan los proveedores) y `max_tokens=8000`, un bucle se corta a tiempo. Se configuran con `LLM_TEMPERATURE` y `LLM_MAX_TOKENS`. |
+| **Temperatura 0.6 y tope de salida** | Los modelos de razonamiento se repiten en bucle con temperatura 0. Con 0.6 (lo que recomiendan los proveedores) y un tope de salida, un bucle se corta a tiempo. La temperatura se configura con `LLM_TEMPERATURE`; el tope sale del esfuerzo de razonamiento (`LLM_EFFORT`: bajo/medio/alto = 8k/12k/16k tokens de salida; en Groq va como `reasoning_effort` low/medium/high y en OpenRouter y Gemini como presupuesto de 100/200/500 tokens para pensar), que también se elige en la barra lateral. |
 | **Reintentos ante 429** | Los resuelve el propio cliente de LangChain (`max_retries=6`, con espera exponencial), así que no hace falta middleware. |
 | **UI Streamlit** | Muestra en vivo cada tool con sus argumentos y un resumen del resultado, renderiza markdown y presenta el JSON final con un botón de descarga. |
 
 ### Razonamiento del modelo
 
-El adaptador de OpenRouter le pide el razonamiento al modelo (`reasoning: {enabled: true}`). `ChatOpenAI` descarta el campo `reasoning` de la respuesta, así que una subclase lo conserva en `additional_kwargs`. La UI lo muestra en un bloque "💭 Razonamiento del modelo", separado del contenido final. Si el modelo elegido no devuelve razonamiento, ese bloque simplemente no aparece y la UI sigue mostrando el recorrido completo de tools con sus argumentos y resultados.
+El adaptador de Groq le pide el razonamiento al modelo (`reasoning_effort` según el nivel bajo/medio/alto, y `reasoning_format: parsed` en los modelos que no son GPT-OSS). `ChatOpenAI` descarta el campo `reasoning` de la respuesta, así que una subclase lo conserva en `additional_kwargs`. La UI lo muestra en un bloque "💭 Razonamiento del modelo", separado del contenido final. Si el modelo elegido no devuelve razonamiento, ese bloque simplemente no aparece y la UI sigue mostrando el recorrido completo de tools con sus argumentos y resultados.
 
 ## Limitaciones conocidas y mejoras
 
-- Los modelos `:free` de OpenRouter tienen límite de peticiones (50 por día con una cuenta sin crédito) y a veces el proveedor los limita (429 *rate-limited upstream*). Una demo completa usa de 6 a 10 llamadas. Para eso están el modelo de respaldo y los reintentos con espera. Si un modelo desaparece, se cambia `MODEL_NAME` por otro gratis con tool calling.
+- El tier gratuito de Groq limita peticiones y tokens por minuto (429 si se pasa). Una demo completa usa de 6 a 10 llamadas; los reintentos con espera exponencial cubren los picos. Si un modelo se da de baja, se cambia `MODEL_NAME` por otro de reasoning con tool calling.
 - `pypdf` no extrae texto de PDFs escaneados: esos libros necesitarían OCR antes de indexarlos.
 - La similitud se calcula en memoria con numpy. Alcanza para unos pocos libros por materia, pero con bibliotecas grandes convendría `sqlite-vec`.
 - El MCP del campus depende del HTML de Moodle. Si el campus cambia, puede romperse; en ese caso la tool devuelve el error y el agente sigue sin el campus.
