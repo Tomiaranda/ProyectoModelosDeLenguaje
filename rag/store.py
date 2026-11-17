@@ -93,6 +93,13 @@ def borrar_materia(con: sqlite3.Connection, materia: str) -> None:
     con.commit()
 
 
+def borrar_libro(con: sqlite3.Connection, materia: str, libro: str) -> None:
+    con.execute(
+        "DELETE FROM fragmentos WHERE materia = ? AND libro = ?", (materia, libro)
+    )
+    con.commit()
+
+
 def buscar(con: sqlite3.Connection, materia: str, vector_consulta: list[float],
            k: int = 3) -> list[dict]:
     """Los k fragmentos de la materia más parecidos a la consulta (similitud coseno)."""

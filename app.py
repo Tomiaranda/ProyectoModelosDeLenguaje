@@ -13,6 +13,14 @@ from dotenv import load_dotenv
 
 load_dotenv()   # antes de render_claves: así las claves recordadas no figuran como faltantes
 
+from rag.administrar import (
+    agregar_materiales,
+    crear_materia,
+    eliminar_material,
+    eliminar_materia,
+    listar_materias,
+)
+
 st.set_page_config(page_title="Generador estud.ia · UTN FRM", page_icon="🎓", layout="wide")
 
 # Chat estilo shadcn: burbuja oscura a la derecha para el usuario, asistente sin
@@ -116,6 +124,14 @@ a.sb-item:hover { background: #f4f4f5; color: #09090b; }
 .trace li.en_curso::before { border-color: #18181b; border-top-color: transparent; animation: girar .8s linear infinite; }
 @keyframes girar { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .trace li.en_curso::before { animation: none; border-top-color: #18181b; } }
+.sb-label-inline { padding: .35rem .5rem; }
+.adm-encabezado { font-size: .8rem; color: #71717a; margin: -.25rem 0 .75rem; }
+.adm-titulo { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; color: #a1a1aa; margin: .85rem 0 .35rem; }
+.adm-fila { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem; border: 1px solid #e4e4e7;
+  border-radius: .5rem; margin: .25rem 0; background: #fff; }
+.adm-fila span { font-size: .875rem; color: #27272a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-testid="stDialog"] [data-testid="stExpander"] details { border-radius: .75rem; }
+[data-testid="stDialog"] button[kind="secondary"] { border-radius: .5rem; }
 </style>""", unsafe_allow_html=True)
 
 CLAVES = {
@@ -151,15 +167,138 @@ def render_claves() -> None:
                 recargar_agente()
 
 
-def recargar_agente() -> None:
-    """Reimporta el agente para que tome las claves o el modelo nuevos."""
-    # ponytail: los módulos leen el entorno al importarse; se reimportan para tomarlo.
-    # La conexión MCP previa al campus queda viva hasta reiniciar la app.
+def _olvidar_agente() -> None:
     for m in list(sys.modules):
         if m.split(".")[0] in ("agente", "tools", "llm", "campus"):
             del sys.modules[m]
     st.session_state.pop("config", None)
+
+
+def _al_cerrar_bibliografia() -> None:
+    if st.session_state.pop("admin_bibliografia_pendiente", False):
+        _olvidar_agente()
+
+
+def _mensaje_admin(tipo: str, texto: str) -> None:
+    st.session_state["admin_msg"] = (tipo, texto)
+
+
+def _quitar_material_cb(materia: str, libro: str) -> None:
+    try:
+        eliminar_material(materia, libro)
+    except Exception as e:
+        _mensaje_admin("error", f"No se pudo quitar «{libro}»: {e}")
+    else:
+        st.session_state["admin_bibliografia_pendiente"] = True
+        _mensaje_admin("ok", f"Quitado «{libro}» de {materia}.")
+
+
+def _indexar_materiales_cb(materia: str, clave: str) -> None:
+    archivos = st.session_state.get(clave) or []
+    try:
+        agregados = agregar_materiales(materia, archivos)
+    except Exception as e:
+        _mensaje_admin("error", f"No se pudo indexar: {e}")
+    else:
+        st.session_state["admin_bibliografia_pendiente"] = True
+        _mensaje_admin("ok", f"Indexados: {', '.join(agregados)}.")
+
+
+def _eliminar_materia_cb(materia: str) -> None:
+    try:
+        eliminar_materia(materia)
+    except Exception as e:
+        _mensaje_admin("error", f"No se pudo eliminar {materia}: {e}")
+    else:
+        st.session_state["admin_bibliografia_pendiente"] = True
+        _mensaje_admin("ok", f"Materia «{materia}» eliminada.")
+
+
+def _crear_materia_cb(clave: str) -> None:
+    try:
+        materia = crear_materia(st.session_state.get(clave, ""))
+    except Exception as e:
+        _mensaje_admin("error", f"No se pudo crear la materia: {e}")
+    else:
+        st.session_state["admin_bibliografia_pendiente"] = True
+        st.session_state[clave] = ""
+        _mensaje_admin("ok", f"Materia «{materia}» creada.")
+
+
+def recargar_agente() -> None:
+    """Reimporta el agente para que tome las claves o el modelo nuevos."""
+    # ponytail: los módulos leen el entorno al importarse; se reimportan para tomarlo.
+    # La conexión MCP previa al campus queda viva hasta reiniciar la app.
+    _olvidar_agente()
     st.rerun()
+
+
+@st.dialog("Administrar bibliografía", width="large", on_dismiss=_al_cerrar_bibliografia)
+def administrar_bibliografia() -> None:
+    from html import escape
+
+    st.markdown(
+        '<div class="adm-encabezado">Las materias son carpetas en <code>rag/libros</code>. '
+        'Agregar o quitar materiales actualiza el índice que consulta el agente.</div>',
+        unsafe_allow_html=True,
+    )
+    mensaje = st.session_state.pop("admin_msg", None)
+    if mensaje:
+        tipo, texto = mensaje
+        if tipo == "ok":
+            st.success(texto)
+        else:
+            st.error(texto)
+    materias = listar_materias()
+    st.markdown('<div class="adm-titulo">Materias</div>', unsafe_allow_html=True)
+    if not materias:
+        st.info("Todavía no hay materias. Creá una más abajo.")
+
+    for materia, libros in materias.items():
+        with st.expander(f"📚 {materia} · {len(libros)} materiales"):
+            if libros:
+                for libro in libros:
+                    fila, quitar = st.columns([4, 1.2], vertical_alignment="center")
+                    fila.markdown(
+                        f'<div class="adm-fila"><span>📄 {escape(libro)}</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                    quitar.button(
+                        "Quitar", key=f"adm-quitar-{materia}-{libro}", type="tertiary",
+                        icon=":material/delete:", use_container_width=True,
+                        on_click=_quitar_material_cb, args=(materia, libro),
+                    )
+            else:
+                st.caption("Sin materiales cargados.")
+
+            nuevos = st.file_uploader(
+                f"Agregar PDFs a {materia}", type=["pdf"], accept_multiple_files=True,
+                key=f"adm-subir-{materia}",
+            )
+            if nuevos:
+                st.button(
+                    "Indexar materiales", key=f"adm-indexar-{materia}", type="primary",
+                    on_click=_indexar_materiales_cb,
+                    args=(materia, f"adm-subir-{materia}"),
+                )
+
+            if st.checkbox(
+                "Borrar esta materia y todo su material", key=f"adm-conf-{materia}"
+            ):
+                st.button(
+                    "Eliminar materia", key=f"adm-borrar-{materia}", type="tertiary",
+                    icon=":material/delete_forever:",
+                    on_click=_eliminar_materia_cb, args=(materia,),
+                )
+
+    st.markdown('<div class="adm-titulo">Nueva materia</div>', unsafe_allow_html=True)
+    nombre = st.text_input(
+        "Nombre de la materia", key="adm-nombre", placeholder="p. ej. Bases de Datos"
+    )
+    st.button(
+        "Crear materia", key="adm-crear", type="primary", disabled=not nombre.strip(),
+        on_click=_crear_materia_cb, args=("adm-nombre",),
+    )
 
 
 # Modelos gratis de OpenRouter con tool calling. Los que no se eligen quedan de respaldo ante un 429.
@@ -453,10 +592,16 @@ def render_sidebar() -> None:
                 init_session(select_thread(thread_id))
                 st.rerun()
 
-        st.markdown('<div class="sb-label">Bibliografía</div>', unsafe_allow_html=True)
+        titulo, administrar = st.columns([3, 2], vertical_alignment="center")
+        with titulo:
+            st.markdown('<div class="sb-label sb-label-inline">Bibliografía</div>', unsafe_allow_html=True)
+        with administrar:
+            if st.button("Administrar", key="admin-bibliografia", icon=":material/settings:",
+                         type="tertiary", use_container_width=True):
+                administrar_bibliografia()
         materias = materias_con_bibliografia()
         if not materias:
-            st.warning("No hay libros indexados. Ejecutá `python -m rag.ingest`.")
+            st.warning("No hay libros indexados. Usá **Administrar** para cargar materiales.")
         for materia, libros in materias.items():
             sub = "".join(f"<div title='{escape(l)}'>{escape(l)}</div>" for l in libros)
             st.markdown(f'<div class="sb-item">{icono("libro")}<span>{escape(materia)}</span>'
@@ -497,7 +642,7 @@ def leer_adjuntos(archivos, turno: int) -> list[dict]:
             tmp.flush()
             try:
                 texto = extraer_texto(Path(tmp.name), MAX_CHARS_CAMPUS)
-            except Exception as e:   # noqa: BLE001
+            except Exception as e: 
                 st.warning(f"No se pudo leer «{f.name}»: {e}")
                 continue
         if texto.strip():
@@ -519,7 +664,7 @@ if entrada := st.chat_input("Pedí preguntas sobre una materia y sus temas…", 
             adjuntos = leer_adjuntos(entrada.files, turno)
             with st.spinner("El agente está trabajando..."):
                 eventos = render_eventos(stream_turn(prompt, st.session_state.config, turno, adjuntos))
-        except Exception as e:   # noqa: BLE001
+        except Exception as e: 
             st.error(f"El agente falló: {e}")
             st.stop()
     st.session_state.historial.append((prompt, eventos))
